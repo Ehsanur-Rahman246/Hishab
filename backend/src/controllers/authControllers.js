@@ -1,14 +1,23 @@
 import User from "../models/User.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import Wallet from "../models/Wallet.js";
+import Transaction from "../models/Transaction.js";
+import Goal from "../models/Goal.js";
+import Alert from "../models/Alert.js";
+import Summary from "../models/Summary.js";
+import ForecastSnapshot from "../models/ForecastSnapshot.js";
+import ChatMessage from "../models/ChatMessage.js";
 
 const PHONE_REGEX = /^01[3-9]\d{8}$/; // BD mobile, 11 digits
-const PIN_REGEX = /^\d{6}$/; // 5-digit PIN
+const PIN_REGEX = /^\d{6}$/; // 6-digit PIN
+
+const isProd = process.env.NODE_ENV === "production";
 
 const cookieOptions = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
-  sameSite: "lax",
+  secure: isProd,
+  sameSite: isProd ? "none" : "lax",
 };
 
 const signAndSetToken = (res, user) => {
@@ -33,7 +42,12 @@ export const register = async (req, res) => {
   try {
     const { name, phone, pin } = req.body;
 
-    if (!name || !phone || !pin) {
+    if (
+      typeof name !== "string" ||
+      typeof phone !== "string" ||
+      !name.trim() ||
+      !pin
+    ) {
       return res.status(400).json({
         success: false,
         message: "Name, phone, and PIN are required",
@@ -66,9 +80,15 @@ export const register = async (req, res) => {
     const hashedPin = await bcrypt.hash(String(pin), 10);
 
     const user = await User.create({
-      name,
+      name: name.trim(),
       phone: phone.trim(),
       pin: hashedPin,
+    });
+
+    await Wallet.create({
+      user: user._id,
+      walletNumber: user.phone,
+      balance: 0,
     });
 
     signAndSetToken(res, user);
@@ -79,6 +99,12 @@ export const register = async (req, res) => {
       user: publicUser(user),
     });
   } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "An account with this phone number already exists",
+      });
+    }
     console.error(error);
     return res.status(500).json({
       success: false,
@@ -91,7 +117,7 @@ export const login = async (req, res) => {
   try {
     const { phone, pin } = req.body;
 
-    if (!phone || !pin) {
+    if (typeof phone !== "string" || !phone.trim() || !pin) {
       return res.status(400).json({
         success: false,
         message: "Phone and PIN are required",
@@ -115,6 +141,16 @@ export const login = async (req, res) => {
         message: "Invalid phone or PIN",
       });
     }
+
+    if (!user.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: "This account is disabled",
+      });
+    }
+
+    user.lastLoginAt = new Date();
+    await user.save();
 
     signAndSetToken(res, user);
 
@@ -171,7 +207,16 @@ export const deleteAccount = async (req, res) => {
       });
     }
 
-    // TODO: cascade-delete this user's other data once those models exist
+    await Promise.all([
+      Wallet.deleteMany({ user: user._id }),
+      Transaction.deleteMany({ user: user._id }),
+      Goal.deleteMany({ user: user._id }),
+      Alert.deleteMany({ user: user._id }),
+      Summary.deleteMany({ user: user._id }),
+      ForecastSnapshot.deleteMany({ user: user._id }),
+      ChatMessage.deleteMany({ user: user._id }),
+    ]);
+
     await User.findByIdAndDelete(user._id);
 
     res.clearCookie("token", cookieOptions);

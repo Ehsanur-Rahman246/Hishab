@@ -7,7 +7,10 @@ export const loginRateLimit = rateLimit({
   skipSuccessfulRequests: true, // successful logins don't count
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => req.body?.phone?.trim() || ipKeyGenerator(req.ip),
+  keyGenerator: (req) =>
+  typeof req.body?.phone === "string" && req.body.phone.trim()
+    ? req.body.phone.trim()
+    : ipKeyGenerator(req.ip),
   message: {
     success: false,
     message: "Too many failed attempts. Try again in 5 minutes",

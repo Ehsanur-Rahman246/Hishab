@@ -5,7 +5,7 @@ import {
   logout,
   register,
 } from "../controllers/authControllers.js";
-import authMiddleware from "../middleware/authMiddleware .js";
+import authMiddleware from "../middleware/authMiddleware.js";
 import { loginRateLimit, authRateLimit } from "../middleware/rateLimit.js";
 
 const authRouter = express.Router();
