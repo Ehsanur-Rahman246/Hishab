@@ -1,19 +1,41 @@
-# Hishab AI Service (Foundation)
+# Hishab AI Service (Pandas + Scikit-learn)
 
-Small Python microservice built with **FastAPI + Pandas**.
+Small Python microservice built with **FastAPI + Pandas + Scikit-learn**.
 
 It does **not** connect to MongoDB. The Node backend (port `5001`) sends
-authenticated users' transaction JSON here for summarization.
+authenticated users' transaction JSON here for summarization and forecasting.
 
-No Scikit-learn, no LLM API in this step — just validation + Pandas stats.
+No LLM API — just transparent stats plus two small, explainable ML models.
+
+## What the endpoint returns
+
+`POST /analyze-transactions` returns two top-level objects:
+
+| Field | How it is made | ML? |
+| ----- | -------------- | --- |
+| `summary` | Pandas sums/means/group-bys (totals, categories, weekly history) | No — exact calculation |
+| `mlInsights.forecast` | `LinearRegression` trend on weekly totals (or historical-average fallback) | Yes / fallback |
+| `mlInsights.unusualExpenses` | `IsolationForest` on expense amounts (or IQR fallback) | Yes / fallback |
+| `mlInsights.overallRisk` + per-week `risk` | Fixed rules comparing predicted expense vs predicted income | No — deterministic rules |
+
+> **New users get a fallback estimate.** With fewer than 4 weeks of history
+> the forecast repeats the user's own weekly average (`modelUsed =
+> "historical_average_fallback"`), and with fewer than 10 expenses the anomaly
+> check uses a simple IQR rule. The response always says which method was used
+> in `modelUsed`, `dataQuality`, and each item's `detectionMethod`.
 
 ## Files
 
 | File | Purpose |
 | ---- | ------- |
-| `main.py` | FastAPI app: `GET /health`, `POST /analyze-transactions` |
+| `main.py` | FastAPI app: `GET /health`, `POST /analyze-transactions` (validation + `summary`) |
+| `ml_service.py` | Forecasting, anomaly detection, risk rules → `mlInsights` |
 | `requirements.txt` | Python dependencies |
 | `.env.example` | Example env vars (copy to `.env`) |
+| `tests/sample_large.json` | 23 txns / 6 weeks → exercises `linear_regression` + `isolation_forest` |
+| `tests/sample_small.json` | 3 txns / 1 week → proves the average fallback works |
+| `tests/sample_income_only.json` | Income only, one txn without description → proves no-expense path never crashes |
+| `tests/test_ml_service.py` | 23 automated checks, no pytest needed (`python tests/test_ml_service.py`) |
 
 ## 1. Open PowerShell in this folder
 
@@ -40,6 +62,9 @@ You should now see `(.venv)` at the start of your prompt.
 ```powershell
 pip install -r requirements.txt
 ```
+
+This installs FastAPI, Pandas, Scikit-learn, and friends (Scikit-learn pulls
+in its own SciPy/NumPy dependencies automatically).
 
 ## 4. (Optional) Create your `.env` file
 
@@ -109,7 +134,9 @@ Invoke-RestMethod `
   -Body $body
 ```
 
-Expected response shape (numbers will match your data):
+Expected response shape (numbers will match your data).
+With only 1 week of history you get the fallback (`modelUsed =
+"historical_average_fallback"`):
 
 ```json
 {
@@ -125,9 +152,111 @@ Expected response shape (numbers will match your data):
     "weeklySummary": [
       { "weekStart": "2026-09-28", "income": 5000.0, "expense": 400.0 }
     ]
+  },
+  "mlInsights": {
+    "modelUsed": "historical_average_fallback",
+    "dataQuality": {
+      "historicalWeeks": 1,
+      "hasEnoughDataForModel": false,
+      "message": "Using historical-average fallback because fewer than 4 weeks of data are available."
+    },
+    "forecast": {
+      "horizonWeeks": 4,
+      "weeks": [
+        {
+          "weekStart": "2026-10-05",
+          "predictedIncome": 5000.0,
+          "predictedExpense": 400.0,
+          "estimatedNetCashflow": 4600.0,
+          "risk": "low"
+        }
+      ]
+    },
+    "overallRisk": {
+      "level": "low",
+      "reason": "Predicted income covers predicted expenses."
+    },
+    "unusualExpenses": []
   }
 }
 ```
+
+## 9. Try the full ML path (10+ transactions across several weeks)
+
+The bundled fixture has 23 transactions over 6 weeks, including one large
+outlier (a 15000 laptop purchase), so it exercises `linear_regression` and
+`isolation_forest`:
+
+```powershell
+$body = Get-Content -Raw "tests\sample_large.json"
+
+Invoke-RestMethod `
+  -Uri "http://127.0.0.1:8000/analyze-transactions" `
+  -Method Post `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+Expected `mlInsights` (forecast numbers move with the data, but the shape is stable):
+
+```json
+{
+  "modelUsed": "linear_regression",
+  "dataQuality": {
+    "historicalWeeks": 6,
+    "hasEnoughDataForModel": true,
+    "message": "Linear regression trained on 6 weeks of history. Treat forecasts as rough estimates, not financial advice."
+  },
+  "forecast": {
+    "horizonWeeks": 4,
+    "weeks": [
+      {
+        "weekStart": "2026-10-12",
+        "predictedIncome": 20000.0,
+        "predictedExpense": 10891.33,
+        "estimatedNetCashflow": 9108.67,
+        "risk": "low"
+      }
+    ]
+  },
+  "overallRisk": { "level": "low", "reason": "Predicted income covers predicted expenses." },
+  "unusualExpenses": [
+    {
+      "date": "2026-10-06",
+      "category": "Shopping",
+      "amount": 15000.0,
+      "description": "Laptop purchase",
+      "detectionMethod": "isolation_forest",
+      "reason": "Amount is much higher than your usual expense pattern."
+    }
+  ]
+}
+```
+
+Other fixtures:
+
+```powershell
+# Too little data -> fallback path (modelUsed = historical_average_fallback)
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/analyze-transactions" `
+  -Method Post -ContentType "application/json" `
+  -Body (Get-Content -Raw "tests\sample_small.json")
+
+# No expenses at all -> unusualExpenses is [], service does not crash
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/analyze-transactions" `
+  -Method Post -ContentType "application/json" `
+  -Body (Get-Content -Raw "tests\sample_income_only.json")
+```
+
+## 10. Run the automated checks (no pytest needed)
+
+```powershell
+python tests/test_ml_service.py
+```
+
+You should see `23 passed, 0 failed.` It covers: regression vs fallback
+selection, consecutive-Monday forecast weeks, non-negative clipping,
+`net = income - expense`, risk-rule table, outlier flagging with cap/newest-first,
+and the income-only / identical-amount edge cases.
 
 ## Error cases
 
@@ -147,3 +276,10 @@ Rows with an unparseable `amount`/`date` are ignored safely
 - CORS allows `http://localhost:5001` so the Node backend can call this service locally.
 - All numbers returned are plain JSON numbers (NumPy/Pandas types are converted with `float()` / `int()`).
 - Weeks start on **Monday** (`weekStart` formatted as `YYYY-MM-DD`).
+- Forecasts are rough statistical guesses from past transactions only — the
+  service never sees the wallet balance, so its output is a **prediction, not
+  financial advice**. Say exactly that in the demo.
+- One honest quirk: a single huge purchase (e.g. a laptop) pulls the
+  `LinearRegression` trend line upward, so predicted expenses can look high.
+  That is expected behavior for a straight-line MVP model, and `dataQuality`
+  always shows how much history the model had.

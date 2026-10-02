@@ -17,6 +17,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
+from ml_service import build_ml_insights
+
 # Load variables from .env file (if it exists). Safe defaults below.
 load_dotenv()
 
@@ -43,8 +45,8 @@ ALLOWED_ORIGINS = (
 
 app = FastAPI(
     title="Hishab AI Service",
-    description="Foundation microservice: transaction summaries with Pandas. No ML/LLM yet.",
-    version="0.1.0",
+    description="Transaction summaries (Pandas) + 4-week forecasts and anomaly flags (Scikit-learn). No LLM.",
+    version="0.2.0",
 )
 
 app.add_middleware(
@@ -204,6 +206,10 @@ def analyze_transactions(payload: AnalyzeRequest):
     # Sort oldest week first.
     weekly_rows.sort(key=lambda r: r["weekStart"])
 
+    # ML insights (forecast + anomalies + risk) from the same cleaned data.
+    # All existing `summary` fields above are unchanged for compatibility.
+    ml_insights = build_ml_insights(df)
+
     return {
         "success": True,
         "userId": payload.userId,
@@ -216,6 +222,7 @@ def analyze_transactions(payload: AnalyzeRequest):
             "categoryExpenses": category_expenses,
             "weeklySummary": weekly_rows,
         },
+        "mlInsights": ml_insights,
     }
 
 
