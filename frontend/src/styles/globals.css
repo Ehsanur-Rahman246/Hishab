@@ -1,0 +1,324 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap");
+
+@import "tailwindcss";
+@import "shadcn/tailwind.css";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  font-family: "Inter", sans-serif;
+  color-scheme: light;
+
+  --background: hsl(210 33% 98%);
+  --foreground: hsl(216 54% 15%);
+
+  --card: hsl(0 0% 100%);
+  --card-foreground: hsl(216 54% 15%);
+
+  --popover: hsl(0 0% 100%);
+  --popover-foreground: hsl(216 54% 15%);
+
+  --primary: hsl(211 92% 34%);
+  --primary-foreground: hsl(0 0% 100%);
+
+  --secondary: hsl(210 100% 96%);
+  --secondary-foreground: hsl(211 76% 29%);
+
+  --muted: hsl(210 25% 95%);
+  --muted-foreground: hsl(215 16% 45%);
+
+  --accent: hsl(49 100% 56%);
+  --accent-foreground: hsl(216 54% 15%);
+
+  --destructive: hsl(0 72% 52%);
+  --destructive-foreground: hsl(0 0% 100%);
+
+  --border: hsl(214 25% 89%);
+  --input: hsl(214 25% 89%);
+  --ring: hsl(211 92% 42%);
+
+  --chart-1: hsl(211 92% 34%);
+  --chart-2: hsl(49 100% 56%);
+  --chart-3: hsl(188 59% 50%);
+  --chart-4: hsl(19 82% 71%);
+  --chart-5: hsl(221 48% 48%);
+
+  --success: hsl(152 60% 32%);
+  --success-foreground: hsl(0 0% 100%);
+
+  --warning: hsl(38 92% 40%);
+  --warning-foreground: hsl(216 54% 15%);
+
+  --info: hsl(199 89% 38%);
+  --info-foreground: hsl(0 0% 100%);
+
+  --radius: 0.85rem;
+
+  /* Brand colors */
+  --brand-blue: #0755a4;
+  --brand-blue-dark: #0d3975;
+  --brand-blue-light: #eaf4ff;
+  --brand-yellow: #ffd51e;
+  --brand-cyan: #35b8c8;
+  --brand-coral: #f39b76;
+
+  --surface-soft: #f7f9fc;
+  --text-main: #102b4a;
+  --text-muted: #68788c;
+
+  /* Shadows */
+  --shadow-card: 0 8px 28px rgba(13, 57, 117, 0.07);
+  --shadow-card-hover: 0 14px 36px rgba(13, 57, 117, 0.12);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --background: hsl(216 54% 9%);
+  --foreground: hsl(210 33% 96%);
+
+  --card: hsl(216 48% 13%);
+  --card-foreground: hsl(210 33% 96%);
+
+  --popover: hsl(216 48% 13%);
+  --popover-foreground: hsl(210 33% 96%);
+
+  --primary: hsl(211 90% 58%);
+  --primary-foreground: hsl(216 54% 9%);
+
+  --secondary: hsl(216 38% 19%);
+  --secondary-foreground: hsl(210 33% 94%);
+
+  --muted: hsl(216 35% 17%);
+  --muted-foreground: hsl(214 18% 69%);
+
+  --accent: hsl(49 100% 56%);
+  --accent-foreground: hsl(216 54% 9%);
+
+  --destructive: hsl(0 62% 42%);
+  --destructive-foreground: hsl(0 0% 100%);
+
+  --border: hsl(216 30% 24%);
+  --input: hsl(216 30% 24%);
+  --ring: hsl(211 90% 62%);
+
+  --chart-1: hsl(211 90% 62%);
+  --chart-2: hsl(49 100% 56%);
+  --chart-3: hsl(188 59% 55%);
+  --chart-4: hsl(19 82% 71%);
+  --chart-5: hsl(221 55% 68%);
+
+  --success: hsl(152 60% 52%);
+  --success-foreground: hsl(216 54% 9%);
+
+  --warning: hsl(43 96% 60%);
+  --warning-foreground: hsl(216 54% 9%);
+
+  --info: hsl(199 89% 62%);
+  --info-foreground: hsl(216 54% 9%);
+
+  --surface-soft: #101f34;
+  --text-main: #edf4ff;
+  --text-muted: #a8b8cc;
+
+  --shadow-card: 0 8px 28px rgba(0, 0, 0, 0.20);
+  --shadow-card-hover: 0 14px 36px rgba(0, 0, 0, 0.28);
+}
+
+/* Tailwind v4 + shadcn theme mapping */
+@theme inline {
+  --font-sans: "Inter", sans-serif;
+  --font-heading: "Manrope", sans-serif;
+
+  --font-display: "Manrope", sans-serif;
+
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-swift: cubic-bezier(0.77, 0, 0.175, 1);
+
+  --shadow-panel: var(--shadow-card);
+  --shadow-glow-solar:
+    0 0 0 1px rgb(255 213 30 / 0.4), 0 8px 40px -12px rgb(255 213 30 / 0.4);
+  --shadow-glow-battery:
+    0 0 0 1px rgb(34 160 105 / 0.35), 0 8px 40px -12px rgb(34 160 105 / 0.35);
+  --shadow-glow-destructive:
+    0 0 0 1px rgb(220 60 60 / 0.35), 0 8px 40px -12px rgb(220 60 60 / 0.3);
+}
+
+/* Keyframes used by ui components */
+@keyframes solar-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@keyframes battery-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(250%);
+  }
+}
+
+@keyframes flow-dash {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+
+/* Base styles */
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: "Inter", sans-serif;
+    font-feature-settings: "cv11", "ss01";
+    text-rendering: optimizeLegibility;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: "Manrope", sans-serif;
+    letter-spacing: -0.035em;
+    font-weight: 700;
+  }
+
+  button, input, textarea, select {
+    font: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  ::selection {
+    color: #102b4a;
+    background: #ffe46a;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+/* Reusable utilities */
+@layer utilities {
+  .font-heading {
+    font-family: "Manrope", sans-serif;
+  }
+
+  .text-brand {
+    color: var(--brand-blue);
+  }
+
+  .bg-brand {
+    background-color: var(--brand-blue);
+  }
+
+  .bg-brand-yellow {
+    background-color: var(--brand-yellow);
+  }
+
+  .bg-brand-soft {
+    background-color: var(--brand-blue-light);
+  }
+
+  .surface-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-card);
+  }
+
+  .surface-card-hover {
+    transition: transform 180ms ease,
+      box-shadow 180ms ease,
+      border-color 180ms ease;
+  }
+
+  .surface-card-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-card-hover);
+  }
+
+  .brand-gradient {
+    background: linear-gradient(
+      135deg,
+      #0755a4 0%,
+      #0d3975 100%
+    );
+  }
+
+  .brand-gradient-soft {
+    background: linear-gradient(
+      135deg,
+      #eaf4ff 0%,
+      #f7f9fc 100%
+    );
+  }
+
+  .yellow-highlight {
+    background: linear-gradient(
+      transparent 58%,
+      rgba(255, 213, 30, 0.58) 58%
+    );
+  }
+}
+
+/* Native form controls */
+input,
+textarea,
+select {
+  accent-color: var(--brand-blue);
+}
