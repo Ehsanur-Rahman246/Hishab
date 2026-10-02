@@ -3,6 +3,7 @@ import express from "express";
 import { connectDB } from "./config/db.js";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import authRouter from "./routes/authRoutes.js";
 
 const app = express();
 
@@ -14,6 +15,8 @@ app.use(cookieParser());
 app.use(cors({ origin: allowedOrigins, credentials: true }));
 
 app.get("/", (_, res) => res.send("Server working"));
+
+app.use("/api/auth", authRouter);
 
 app.use((_, res) => {
   res.status(404).json({
