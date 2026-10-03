@@ -1,7 +1,9 @@
-import { Navigate, Route, Routes } from "react-router";
+import { Navigate, Outlet, Route, Routes } from "react-router";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AppLayout from "@/components/AppLayout";
+import { useCurrentUser } from "@/hooks/useAuth";
 
+import Landing from "@/pages/Landing";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import Dashboard from "@/pages/Dashboard";
@@ -14,17 +16,44 @@ import Settings from "@/pages/Settings";
 import Profile from "@/pages/Profile";
 import Notifications from "@/pages/Notifications";
 
+function PublicOnlyRoute() {
+  const { data: user, isLoading } = useCurrentUser();
+
+  if (isLoading) {
+    return (
+      <div
+        className="flex min-h-svh items-center justify-center text-sm text-muted-foreground"
+        role="status"
+        aria-live="polite"
+      >
+        Loading…
+      </div>
+    );
+  }
+
+  if (user) {
+    return <Navigate to="/ai-assistant" replace />;
+  }
+
+  return <Outlet />;
+}
+
 export default function AppRoutes() {
   return (
     <Routes>
-      {/* public */}
-      <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
+      {/* public landing */}
+      <Route path="/" element={<Landing />} />
+
+      {/* public-only auth pages: authenticated users go to AI Assistant */}
+      <Route element={<PublicOnlyRoute />}>
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+      </Route>
 
       {/* private */}
       <Route element={<ProtectedRoute />}>
         <Route element={<AppLayout />}>
-          <Route path="/" element={<Dashboard />} />
+          <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/transactions" element={<Transactions />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/ai-assistant" element={<AiAssistant />} />
@@ -36,7 +65,7 @@ export default function AppRoutes() {
         </Route>
       </Route>
 
-      {/* anything else */}
+      {/* anything else goes to landing */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
