@@ -27,7 +27,7 @@ export default function Register() {
   const location = useLocation();
   const register = useRegister();
 
-  const from = location.state?.from?.pathname || "/ai-assistant";
+  const from = location.state?.from?.pathname || "/dashboard";
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");

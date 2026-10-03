@@ -18,7 +18,7 @@ export default function Login() {
   const location = useLocation();
   const login = useLogin();
 
-  const from = location.state?.from?.pathname || "/ai-assistant";
+  const from = location.state?.from?.pathname || "/dashboard";
 
   const [phone, setPhone] = useState("");
   const [pin, setPin] = useState("");

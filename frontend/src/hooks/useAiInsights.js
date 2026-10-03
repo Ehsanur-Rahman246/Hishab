@@ -39,9 +39,10 @@ export function useGenerateInsights() {
     mutationFn: async () => (await api.post("/api/ai/analyze", {})).data,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["ai", "latest-insights"] });
-      // A fresh analysis may create shortfall/anomaly alerts: refresh the
+// A fresh analysis may create shortfall/anomaly alerts: refresh the
       // notification badge and list as well.
       queryClient.invalidateQueries({ queryKey: ["alerts"] });
+      queryClient.invalidateQueries({ queryKey: ["summaries"] }); // dashboard forecast card
     },
   });
 }
