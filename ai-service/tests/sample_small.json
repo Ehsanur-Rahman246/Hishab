@@ -1,0 +1,8 @@
+{
+  "userId": "test-user-small",
+  "transactions": [
+    { "type": "income", "category": "Salary", "amount": 5000, "date": "2026-09-29T10:00:00.000Z", "description": "Salary" },
+    { "type": "expense", "category": "Food", "amount": 250, "date": "2026-10-01T12:00:00.000Z", "description": "Lunch" },
+    { "type": "expense", "category": "Food", "amount": 150, "date": "2026-10-02T12:00:00.000Z", "description": "Dinner" }
+  ]
+}
