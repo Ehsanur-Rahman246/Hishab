@@ -1,4 +1,3 @@
-// src/middlewares/userAuth.js
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 
@@ -31,7 +30,7 @@ const authMiddleware = async (req, res, next) => {
     }
 
     // make sure the account still exists (e.g. deleted on another device)
-    const userExists = await User.exists({ _id: decoded.userId });
+    const userExists = await User.exists({ _id: decoded.userId, isActive: true });
 
     if (!userExists) {
       return res.status(401).json({
