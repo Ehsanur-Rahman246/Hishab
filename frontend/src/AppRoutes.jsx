@@ -32,7 +32,7 @@ function PublicOnlyRoute() {
   }
 
   if (user) {
-    return <Navigate to="/ai-assistant" replace />;
+    return <Navigate to="/dashboard" replace />;
   }
 
   return <Outlet />;
@@ -41,11 +41,9 @@ function PublicOnlyRoute() {
 export default function AppRoutes() {
   return (
     <Routes>
-      {/* public landing */}
-      <Route path="/" element={<Landing />} />
-
-      {/* public-only auth pages: authenticated users go to AI Assistant */}
+      {/* public-only pages (landing + auth): authenticated users go to the dashboard */}
       <Route element={<PublicOnlyRoute />}>
+        <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
       </Route>

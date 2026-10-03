@@ -21,6 +21,26 @@ export function formatBDT(value) {
   }
 }
 
+// 24850.4 -> taka 24,850 (no paise). Never throws; bad input shows a dash.
+// Built by hand so the taka sign shows the same in every browser and locale.
+export function formatBDTWhole(value) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return `${TAKA}${NBSP}${DASH}`
+  const digits = Math.abs(Math.round(n)).toLocaleString('en-BD')
+  return `${n < 0 && Math.round(n) !== 0 ? '-' : ''}${TAKA}${digits}`
+}
+
+// Short form for chart axes: 2500 -> taka 2.5k, 1200000 -> taka 1.2M.
+export function formatBDTCompact(value) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return `${TAKA}${NBSP}${DASH}`
+  const abs = Math.abs(n)
+  const trim = (x) => String(Number(x.toFixed(2)))
+  if (abs >= 1_000_000) return `${TAKA}${trim(n / 1_000_000)}M`
+  if (abs >= 1_000) return `${TAKA}${trim(n / 1_000)}k`
+  return `${TAKA}${trim(n)}`
+}
+
 // "2026-10-12" / ISO string -> "12 Oct 2026". Never throws.
 export function formatDate(value) {
   const d = new Date(value)

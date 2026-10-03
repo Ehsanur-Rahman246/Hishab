@@ -39,6 +39,7 @@ export function useGenerateInsights() {
     mutationFn: async () => (await api.post("/api/ai/analyze", {})).data,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["ai", "latest-insights"] });
+      queryClient.invalidateQueries({ queryKey: ["summaries"] }); // dashboard forecast card
     },
   });
 }
