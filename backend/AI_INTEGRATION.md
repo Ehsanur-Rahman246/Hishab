@@ -204,10 +204,71 @@ Failures (no stack traces are ever sent to clients):
 
 | File | Purpose |
 | ---- | ------- |
-| `src/controllers/aiControllers.js` | `analyzeTransactions` (+ snapshot save), `getLatestInsights`, `checkAiHealth`, timeout + error mapping |
-| `src/routes/aiRoutes.js` | `GET /health`, `POST /analyze`, `GET /latest-insights` (all behind `authMiddleware`) |
+| `src/controllers/aiControllers.js` | `analyzeTransactions` (+ snapshot save), `getLatestInsights`, `askCoach`, `checkAiHealth`, timeout + error mapping |
+| `src/services/geminiCoachService.js` | Gemini SDK calls, strict system prompt, JSON validation (never sees DB code) |
+| `src/middleware/rateLimit.js` | `coachRateLimit`: 10 questions / 10 min per user |
+| `src/routes/aiRoutes.js` | `GET /health`, `POST /analyze`, `GET /latest-insights`, `POST /coach` (all behind `authMiddleware`) |
 | `src/server.js` | mounts router at `/api/ai` |
-| `.env.example` | documents `AI_SERVICE_URL` (placeholders only, no real secrets) |
+| `.env.example` | documents `AI_SERVICE_URL`, `GEMINI_API_KEY`, `GEMINI_MODEL` (placeholders only, no real secrets) |
 | `../frontend/src/pages/AiInsightsPage.jsx` | “AI Financial Insights” dashboard (live + saved data) |
-| `../frontend/src/components/ai/` | `RiskBadge`, `OverallRiskCard`, `ForecastSection`, `UnusualExpenses`, `DataQualityNotice`, `InsightsSkeleton` |
+| `../frontend/src/components/ai/` | `RiskBadge`, `OverallRiskCard`, `ForecastSection`, `UnusualExpenses`, `DataQualityNotice`, `InsightsSkeleton`, `AiCoach` |
 | `../frontend/src/hooks/useAiInsights.js` | react-query hooks (cookie-auth axios client in `lib/api.js`, Taka formatting in `lib/format.js`) |
+| `../frontend/src/hooks/useAiCoach.js` | `useAskCoach` mutation (`POST /api/ai/coach`) |
+
+## AI Coach (Gemini, bilingual)
+
+Secure flow — React never calls Gemini, the key never leaves the backend:
+
+```text
+React "Ask Hishab AI" (JWT cookie, { message, language })
+  ▼
+Node POST /api/ai/coach (auth → coachRateLimit → askCoach)
+  │  1. Validate message (≤500 chars) + language (auto/bn/en)
+  │  2. Build trusted context: totals, top-5 categories, latest snapshot,
+  │     5 largest recent expenses (honestly labelled, NOT ML flags),
+  │     active goals, last 8 chat messages — never raw transactions or PII
+  │  3. Gemini (system prompt + structured JSON) → server-side validation
+  │  4. Save user + assistant texts to ChatMessage (validated only)
+  ▼
+React renders headline / answer / action cards / disclaimer
+```
+
+Local Gemini setup (`backend/.env` — real values stay local, never committed):
+
+```text
+GEMINI_API_KEY=... (your own key)
+GEMINI_MODEL=...  (your selected model)
+```
+
+Without both variables the endpoint returns `503` (not configured).
+
+Language selection: `bn` forces Bangla, `en` forces English (server rejects
+Bangla-contaminated English replies with `502`), `auto` (default) matches the
+message — Bangla→`bn`, English→`en`, Banglish→`mixed`. The UI selector offers
+Auto / বাংলা / English with matching starter prompts.
+
+Rate limit: 10 questions per 10 minutes per user → `429` with a bilingual
+“wait a few minutes” message (Bangla + English in one string).
+
+Privacy: only aggregates cross the Gemini boundary — no transaction list, no
+emails/phones/passwords/tokens/secrets. Chat history stores message texts only.
+
+Limitation: generated explanations may be imperfect — they interpret rough
+forecasts, not live balances, and are estimates, not financial advice. The
+model is instructed to say when data is too thin and to give at most 3 actions.
+
+Test after logging in (`$s` session as above):
+
+```powershell
+# English
+Invoke-RestMethod `
+  -Uri "http://localhost:5001/api/ai/coach" `
+  -Method Post -ContentType "application/json" -WebSession $s `
+  -Body (@{ message = "Where am I spending the most this month?"; language = "en" } | ConvertTo-Json)
+
+# Bangla (needs Bangla-capable shell font to read; JSON is UTF-8)
+Invoke-RestMethod `
+  -Uri "http://localhost:5001/api/ai/coach" `
+  -Method Post -ContentType "application/json" -WebSession $s `
+  -Body (@{ message = "আমার আর্থিক ঝুঁকি কতটুকু?"; language = "bn" } | ConvertTo-Json)
+```

@@ -9,6 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import { AiCoach } from '@/components/ai/AiCoach'
 import { DataQualityNotice } from '@/components/ai/DataQualityNotice'
 import { ForecastSection } from '@/components/ai/ForecastSection'
 import { InsightsSkeleton } from '@/components/ai/InsightsSkeleton'
@@ -229,6 +230,9 @@ export function AiInsightsPage() {
           />
         </>
       ) : null}
+
+      {/* F. Bilingual AI coach (works with or without a saved forecast). */}
+      <AiCoach />
     </main>
   )
 }
