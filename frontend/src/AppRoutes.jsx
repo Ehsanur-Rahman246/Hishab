@@ -15,6 +15,7 @@ import Goals from "@/pages/Goals";
 import Settings from "@/pages/Settings";
 import Profile from "@/pages/Profile";
 import Notifications from "@/pages/Notifications";
+import Zakat from "@/pages/Zakat";
 
 function PublicOnlyRoute() {
   const { data: user, isLoading } = useCurrentUser();
@@ -60,6 +61,7 @@ export default function AppRoutes() {
           <Route path="/settings" element={<Settings />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/notifications" element={<Notifications />} />
+          <Route path="/zakat" element={<Zakat />} />
         </Route>
       </Route>
 
