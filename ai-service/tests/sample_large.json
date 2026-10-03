@@ -1,0 +1,33 @@
+{
+  "userId": "test-user-large",
+  "transactions": [
+    { "type": "income", "category": "Salary", "amount": 20000, "date": "2026-08-31T10:00:00.000Z", "description": "August salary" },
+    { "type": "expense", "category": "Food", "amount": 320, "date": "2026-09-01T12:00:00.000Z", "description": "Lunch" },
+    { "type": "expense", "category": "Food", "amount": 450, "date": "2026-09-02T18:00:00.000Z", "description": "Groceries" },
+    { "type": "expense", "category": "Transport", "amount": 150, "date": "2026-09-03T08:00:00.000Z", "description": "Bus fare" },
+
+    { "type": "income", "category": "Salary", "amount": 20000, "date": "2026-09-07T10:00:00.000Z", "description": "Weekly payout" },
+    { "type": "expense", "category": "Food", "amount": 380, "date": "2026-09-08T12:00:00.000Z", "description": "Lunch" },
+    { "type": "expense", "category": "Transport", "amount": 180, "date": "2026-09-09T08:00:00.000Z", "description": "Rickshaw" },
+    { "type": "expense", "category": "Bills", "amount": 1200, "date": "2026-09-10T10:00:00.000Z", "description": "Electricity bill" },
+
+    { "type": "income", "category": "Salary", "amount": 20000, "date": "2026-09-14T10:00:00.000Z", "description": "Weekly payout" },
+    { "type": "expense", "category": "Food", "amount": 420, "date": "2026-09-15T12:00:00.000Z", "description": "Dinner" },
+    { "type": "expense", "category": "Shopping", "amount": 900, "date": "2026-09-16T15:00:00.000Z", "description": "Shoes" },
+    { "type": "expense", "category": "Transport", "amount": 160, "date": "2026-09-17T08:00:00.000Z", "description": "Bus fare" },
+
+    { "type": "income", "category": "Salary", "amount": 20000, "date": "2026-09-21T10:00:00.000Z", "description": "Weekly payout" },
+    { "type": "expense", "category": "Food", "amount": 500, "date": "2026-09-22T12:00:00.000Z", "description": "Groceries" },
+    { "type": "expense", "category": "Healthcare", "amount": 1100, "date": "2026-09-23T10:00:00.000Z", "description": "Clinic visit" },
+    { "type": "expense", "category": "Transport", "amount": 200, "date": "2026-09-24T08:00:00.000Z", "description": "CNG" },
+
+    { "type": "income", "category": "Salary", "amount": 20000, "date": "2026-09-28T10:00:00.000Z", "description": "Weekly payout" },
+    { "type": "expense", "category": "Food", "amount": 460, "date": "2026-09-29T12:00:00.000Z", "description": "Lunch" },
+    { "type": "expense", "category": "Entertainment", "amount": 700, "date": "2026-09-30T19:00:00.000Z", "description": "Movie night" },
+    { "type": "expense", "category": "Transport", "amount": 170, "date": "2026-10-01T08:00:00.000Z", "description": "Bus fare" },
+
+    { "type": "income", "category": "Salary", "amount": 20000, "date": "2026-10-05T10:00:00.000Z", "description": "Weekly payout" },
+    { "type": "expense", "category": "Shopping", "amount": 15000, "date": "2026-10-06T15:00:00.000Z", "description": "Laptop purchase" },
+    { "type": "expense", "category": "Food", "amount": 350, "date": "2026-10-07T12:00:00.000Z", "description": "Lunch" }
+  ]
+}

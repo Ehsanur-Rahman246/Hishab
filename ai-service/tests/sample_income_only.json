@@ -1,0 +1,8 @@
+{
+  "userId": "test-user-income-only",
+  "transactions": [
+    { "type": "income", "category": "Salary", "amount": 5000, "date": "2026-09-29T10:00:00.000Z", "description": "Salary" },
+    { "type": "income", "category": "Other", "amount": 800, "date": "2026-10-03T10:00:00.000Z" },
+    { "type": "income", "category": "Salary", "amount": 5000, "date": "2026-10-06T10:00:00.000Z", "description": "Salary" }
+  ]
+}
