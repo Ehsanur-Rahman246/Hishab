@@ -523,8 +523,8 @@ function ForecastSkeleton() {
         ))}
       </div>
       <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
-        <Skeleton className="h-[480px] rounded-xl bg-muted" />
-        <Skeleton className="h-[480px] rounded-xl bg-muted" />
+        <Skeleton className="h-120 rounded-xl bg-muted" />
+        <Skeleton className="h-120 rounded-xl bg-muted" />
       </div>
     </div>
   );

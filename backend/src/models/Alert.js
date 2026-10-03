@@ -84,6 +84,11 @@ const alertSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+
+    dedupeKey: {
+      type: String,
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -94,6 +99,11 @@ alertSchema.index({ user: 1, read: 1, createdAt: -1 });
 // Deduplication: one alert per (user, sourceKey). Sparse so legacy alerts
 // without a sourceKey are unaffected.
 alertSchema.index({ user: 1, sourceKey: 1 }, { unique: true, sparse: true });
+
+alertSchema.index(
+  { user: 1, dedupeKey: 1 },
+  { unique: true, partialFilterExpression: { dedupeKey: { $type: "string" } } },
+);
 
 const Alert = mongoose.model("Alert", alertSchema);
 

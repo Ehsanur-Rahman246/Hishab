@@ -2,6 +2,9 @@ import { api } from "./api";
 
 export const getAlerts = () => api.get("/api/alerts").then((r) => r.data);
 
+export const refreshAlerts = () =>
+  api.post("/api/alerts/refresh").then((r) => r.data);
+
 export const getAlert = (id) =>
   api.get(`/api/alerts/${id}`).then((r) => r.data);
 

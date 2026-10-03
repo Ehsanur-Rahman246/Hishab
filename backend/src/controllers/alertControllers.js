@@ -1,4 +1,18 @@
 import Alert from "../models/Alert.js";
+import { syncAlerts } from "../services/alertService.js";
+
+export const refreshAlerts = async (req, res) => {
+  try {
+    const created = await syncAlerts(req.user.userId);
+    return res.status(200).json({ success: true, created });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
 
 export const getAlerts = async (req, res) => {
   try {

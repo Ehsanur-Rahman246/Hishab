@@ -6,6 +6,7 @@ import {
   markAllAsRead,
   resolveAlert,
   deleteAlert,
+  refreshAlerts,
 } from "../controllers/alertControllers.js";
 import authMiddleware from "../middleware/authMiddleware.js";
 import { validateIdParam } from "../middleware/validateObjectId.js";
@@ -14,6 +15,8 @@ const alertRouter = express.Router();
 alertRouter.param("id", validateIdParam);
 
 alertRouter.get("/", authMiddleware, getAlerts);
+
+alertRouter.post("/refresh", authMiddleware, refreshAlerts);
 
 alertRouter.get("/:id", authMiddleware, getOneAlert);
 

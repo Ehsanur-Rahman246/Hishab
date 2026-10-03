@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import {
@@ -29,6 +29,7 @@ import {
   useMarkAlertRead,
   useMarkAllAlertsRead,
   useResolveAlert,
+  useRefreshAlerts,
 } from "@/hooks/useAlerts";
 import { formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -282,11 +283,17 @@ const Notifications = () => {
   const markAll = useMarkAllAlertsRead();
   const resolve = useResolveAlert();
   const remove = useDeleteAlert();
+  const sync = useRefreshAlerts();
 
   const [tab, setTab] = useState("all");
   const [type, setType] = useState("all");
 
   const alerts = useMemo(() => data?.alerts ?? [], [data]);
+
+  useEffect(() => {
+    sync.mutate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const counts = useMemo(
     () => ({
@@ -309,7 +316,9 @@ const Notifications = () => {
   );
 
   // a row is busy while any single-row action for it is in flight
-  const busyId = [markRead, resolve, remove].find((m) => m.isPending)?.variables;
+  const busyId = [markRead, resolve, remove].find(
+    (m) => m.isPending,
+  )?.variables;
 
   const handleRead = (alert) =>
     markRead.mutate(alert._id, {
@@ -341,10 +350,14 @@ const Notifications = () => {
   const filtered = tab !== "all" || type !== "all";
 
   return (
-    <div className="mx-auto w-full max-w-[1400px] space-y-6">
+    <div className="mx-auto w-full max-w-350 space-y-6">
       {/* tabs */}
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3 border-b">
-        <div role="tablist" aria-label="Filter notifications" className="flex gap-1">
+        <div
+          role="tablist"
+          aria-label="Filter notifications"
+          className="flex gap-1"
+        >
           {TABS.map((t) => {
             const active = tab === t.value;
             return (
@@ -386,29 +399,32 @@ const Notifications = () => {
               Mark all as read
             </button>
           ) : null}
-        <div className="relative w-full flex-1 sm:w-56 sm:flex-none">
-          <Funnel
-            className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground"
-            aria-hidden="true"
-          />
-          <select
-            aria-label="Filter by type"
-            value={type}
-            onChange={(e) => setType(e.target.value)}
-            className={cn(CONTROL, "cursor-pointer appearance-none pr-9 pl-10")}
-          >
-            <option value="all">All types</option>
-            {Object.entries(TYPES).map(([value, t]) => (
-              <option key={value} value={value}>
-                {t.label}
-              </option>
-            ))}
-          </select>
-          <ChevronDown
-            className="pointer-events-none absolute top-1/2 right-3.5 size-4 -translate-y-1/2 text-muted-foreground"
-            aria-hidden="true"
-          />
-        </div>
+          <div className="relative w-full flex-1 sm:w-56 sm:flex-none">
+            <Funnel
+              className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <select
+              aria-label="Filter by type"
+              value={type}
+              onChange={(e) => setType(e.target.value)}
+              className={cn(
+                CONTROL,
+                "cursor-pointer appearance-none pr-9 pl-10",
+              )}
+            >
+              <option value="all">All types</option>
+              {Object.entries(TYPES).map(([value, t]) => (
+                <option key={value} value={value}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              className="pointer-events-none absolute top-1/2 right-3.5 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden="true"
+            />
+          </div>
         </div>
       </div>
 
@@ -425,10 +441,19 @@ const Notifications = () => {
             tone="bg-destructive/10 text-destructive"
             title="Notifications unavailable"
           >
-            <p role="alert" className="mt-1 max-w-sm text-sm text-muted-foreground">
-              {errorMessage(error, "We could not load your notifications. Please try again.")}
+            <p
+              role="alert"
+              className="mt-1 max-w-sm text-sm text-muted-foreground"
+            >
+              {errorMessage(
+                error,
+                "We could not load your notifications. Please try again.",
+              )}
             </p>
-            <Button className={cn("mt-5 h-10 px-5", PRIMARY_BTN)} onClick={() => refetch()}>
+            <Button
+              className={cn("mt-5 h-10 px-5", PRIMARY_BTN)}
+              onClick={() => refetch()}
+            >
               Try again
             </Button>
           </Message>
@@ -436,7 +461,9 @@ const Notifications = () => {
           <Message
             icon={filtered ? BellOff : Bell}
             tone="bg-brand-soft text-[#064581] dark:bg-primary/15 dark:text-primary"
-            title={filtered ? "No matching notifications" : "No notifications yet"}
+            title={
+              filtered ? "No matching notifications" : "No notifications yet"
+            }
           >
             <p className="mt-1 max-w-sm text-sm text-muted-foreground">
               {filtered
@@ -459,7 +486,10 @@ const Notifications = () => {
         ) : (
           <ul
             aria-busy={isFetching}
-            className={cn("divide-y transition-opacity", isFetching && "opacity-70")}
+            className={cn(
+              "divide-y transition-opacity",
+              isFetching && "opacity-70",
+            )}
           >
             {visible.map((alert) => (
               <NotificationRow
@@ -496,11 +526,14 @@ const Notifications = () => {
             </Button>
             <Button
               variant="outline"
-              onClick={() => refetch()}
-              disabled={isFetching}
+              onClick={() => sync.mutate()}
+              disabled={isFetching || sync.isPending}
               className="h-12 rounded-xl px-6 text-[15px] font-medium"
             >
-              <RefreshCw className={cn(isFetching && "animate-spin")} aria-hidden="true" />
+              <RefreshCw
+                className={cn((isFetching || sync.isPending) && "animate-spin")}
+                aria-hidden="true"
+              />
               Refresh
             </Button>
           </div>
