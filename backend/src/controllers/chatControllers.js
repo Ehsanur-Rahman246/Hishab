@@ -55,46 +55,6 @@ export const getOneMessage = async (req, res) => {
   }
 };
 
-export const createMessage = async (req, res) => {
-  try {
-    const userId = req.user.userId;
-    const { role, text } = req.body;
-
-    if (!role || !text) {
-      return res.status(400).json({
-        success: false,
-        message: "Role and text are required",
-      });
-    }
-
-    if (!["user", "assistant"].includes(role)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid message role",
-      });
-    }
-
-    const message = await ChatMessage.create({
-      user: userId,
-      role,
-      text,
-    });
-
-    return res.status(201).json({
-      success: true,
-      message: "Message created successfully",
-      data: message,
-    });
-  } catch (error) {
-    console.error(error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-    });
-  }
-};
-
 export const deleteMessage = async (req, res) => {
   try {
     const userId = req.user.userId;

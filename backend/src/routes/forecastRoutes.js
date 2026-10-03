@@ -3,7 +3,6 @@ import {
   getForecasts,
   getOneForecast,
   getLatestForecast,
-  createForecast,
   deleteForecast,
 } from "../controllers/forecastControllers.js";
 import authMiddleware from "../middleware/authMiddleware.js";
@@ -17,8 +16,6 @@ forecastRouter.get("/", authMiddleware, getForecasts);
 forecastRouter.get("/latest", authMiddleware, getLatestForecast);
 
 forecastRouter.get("/:id", authMiddleware, getOneForecast);
-
-forecastRouter.post("/", authMiddleware, createForecast);
 
 forecastRouter.delete("/:id", authMiddleware, deleteForecast);
 

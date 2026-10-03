@@ -1,7 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getMessages,
-  createMessage,
   deleteMessage,
   deleteAllMessages,
 } from "../api/chatApi";
@@ -17,6 +16,5 @@ const useChatMutation = (fn) => {
   });
 };
 
-export const useCreateMessage = () => useChatMutation(createMessage);
 export const useDeleteMessage = () => useChatMutation(deleteMessage);
 export const useDeleteAllMessages = () => useChatMutation(deleteAllMessages);

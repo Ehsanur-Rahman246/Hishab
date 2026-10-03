@@ -98,6 +98,17 @@ def build_weekly_history(df):
         .sort_values("weekStart")
         .reset_index(drop=True)
     )
+    full_range = pd.date_range(
+        start=history["weekStart"].min(),
+        end=history["weekStart"].max(),
+        freq="7D",
+    )
+    history = (
+        history.set_index("weekStart")
+        .reindex(full_range, fill_value=0.0)
+        .rename_axis("weekStart")
+        .reset_index()
+    )
     history["income"] = history["income"].astype(float)
     history["expense"] = history["expense"].astype(float)
     return history

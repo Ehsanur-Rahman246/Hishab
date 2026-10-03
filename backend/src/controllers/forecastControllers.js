@@ -86,55 +86,6 @@ export const getLatestForecast = async (req, res) => {
   }
 };
 
-export const createForecast = async (req, res) => {
-  try {
-    const userId = req.user.userId;
-
-    const { modelUsed, horizonWeeks, weeks } = req.body;
-
-    if (!modelUsed || !horizonWeeks || !weeks) {
-      return res.status(400).json({
-        success: false,
-        message: "Model, horizon, and forecast weeks are required",
-      });
-    }
-
-    if (!Array.isArray(weeks) || weeks.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "At least one forecast week is required",
-      });
-    }
-
-    if (Number(horizonWeeks) !== weeks.length) {
-      return res.status(400).json({
-        success: false,
-        message: "Horizon weeks must match the number of forecast weeks",
-      });
-    }
-
-    const forecast = await ForecastSnapshot.create({
-      user: userId,
-      modelUsed,
-      horizonWeeks: Number(horizonWeeks),
-      weeks,
-    });
-
-    return res.status(201).json({
-      success: true,
-      message: "Forecast created successfully",
-      forecast,
-    });
-  } catch (error) {
-    console.error(error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-    });
-  }
-};
-
 export const deleteForecast = async (req, res) => {
   try {
     const userId = req.user.userId;

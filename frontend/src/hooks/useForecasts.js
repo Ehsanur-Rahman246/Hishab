@@ -2,20 +2,11 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getForecasts,
   getForecast,
-  getLatestForecast,
-  createForecast,
   deleteForecast,
 } from "../api/forecastApi";
 
 export const useForecasts = () =>
   useQuery({ queryKey: ["forecasts"], queryFn: getForecasts });
-
-export const useLatestForecast = () =>
-  useQuery({
-    queryKey: ["forecasts", "latest"],
-    queryFn: getLatestForecast,
-    retry: false, // 404 just means "no forecast yet"
-  });
 
 export const useForecast = (id) =>
   useQuery({
@@ -32,5 +23,4 @@ const useForecastMutation = (fn) => {
   });
 };
 
-export const useCreateForecast = () => useForecastMutation(createForecast);
 export const useDeleteForecast = () => useForecastMutation(deleteForecast);

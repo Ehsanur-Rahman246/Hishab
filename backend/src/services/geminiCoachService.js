@@ -100,7 +100,7 @@ export const generateCoachReply = async ({ message, language, context }) => {
         responseMimeType: "application/json",
         responseSchema: COACH_RESPONSE_SCHEMA,
         temperature: 0.4,
-        maxOutputTokens: 1024,
+        maxOutputTokens: 4096,
       },
     });
 

@@ -1,5 +1,5 @@
 import Transaction from "../models/Transaction.js";
-
+import Wallet from "../models/Wallet.js";
 const CATEGORIES = [
   "Food",
   "Transport",
@@ -60,20 +60,46 @@ export const createTransaction = async (req, res) => {
       });
     }
 
-    const transaction = await Transaction.create({
-      user: userId,
-      type,
-      category,
-      subcategory: subcategory || null,
-      amount: amountValue,
-      date: dateValue,
-      description: description || null,
-    });
+    // Move the wallet first (atomic). Expenses can't exceed the balance.
+    const delta = type === "income" ? amountValue : -amountValue;
+    const wallet = await Wallet.findOneAndUpdate(
+      type === "income"
+        ? { user: userId }
+        : { user: userId, balance: { $gte: amountValue } },
+      { $inc: { balance: delta } },
+      { new: true },
+    );
+
+    if (!wallet) {
+      const exists = await Wallet.exists({ user: userId });
+      return res.status(exists ? 400 : 404).json({
+        success: false,
+        message: exists ? "Insufficient wallet balance" : "Wallet not found",
+      });
+    }
+
+    let transaction;
+    try {
+      transaction = await Transaction.create({
+        user: userId,
+        type,
+        category,
+        subcategory: subcategory || null,
+        amount: amountValue,
+        date: dateValue,
+        description: description || null,
+      });
+    } catch (err) {
+      // undo the wallet change if saving the transaction failed
+      await Wallet.updateOne({ user: userId }, { $inc: { balance: -delta } });
+      throw err;
+    }
 
     return res.status(201).json({
       success: true,
       message: "Transaction created successfully",
       transaction,
+      balance: wallet.balance,
     });
   } catch (error) {
     console.error(error);
@@ -207,6 +233,13 @@ export const deleteTransaction = async (req, res) => {
         message: "Transaction not found",
       });
     }
+
+    // reverse the wallet effect (never below 0)
+    const delta =
+      transaction.type === "income" ? -transaction.amount : transaction.amount;
+    await Wallet.updateOne({ user: userId }, [
+      { $set: { balance: { $max: [0, { $add: ["$balance", delta] }] } } },
+    ]);
 
     return res.status(200).json({
       success: true,

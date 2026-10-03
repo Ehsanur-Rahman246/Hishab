@@ -28,7 +28,11 @@ const VALID_RISKS = ["low", "medium", "high"];
 
 // Helper: Node's built-in fetch + a timeout via AbortController.
 // No extra dependency (no axios) needed.
-const fetchWithTimeout = async (url, options = {}, timeoutMs = AI_TIMEOUT_MS) => {
+const fetchWithTimeout = async (
+  url,
+  options = {},
+  timeoutMs = AI_TIMEOUT_MS,
+) => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -88,12 +92,15 @@ const toSnapshotWeeks = (forecastWeeks, openingBalance) => {
 
     runningBalance += inflow - outflow;
 
+    const mlRisk = VALID_RISKS.includes(w?.risk) ? w.risk : "low";
+
     return {
       weekStart,
       predictedInflow: inflow,
       predictedOutflow: outflow,
       predictedBalance: runningBalance,
-      shortfallRisk: VALID_RISKS.includes(w?.risk) ? w.risk : "low",
+      // a negative predicted balance is always a high shortfall risk
+      shortfallRisk: runningBalance < 0 ? "high" : mlRisk,
     };
   });
 };
@@ -151,7 +158,7 @@ export const analyzeTransactions = async (req, res) => {
       if (aiRes.status === 400 || aiRes.status === 422) {
         const message = await readAiErrorMessage(
           aiRes,
-          "AI service could not analyze these transactions."
+          "AI service could not analyze these transactions.",
         );
         return res.status(aiRes.status).json({ success: false, message });
       }
@@ -406,7 +413,9 @@ export const askCoach = async (req, res) => {
     }
 
     const language =
-      rawLanguage === undefined ? "auto" : String(rawLanguage).trim().toLowerCase();
+      rawLanguage === undefined
+        ? "auto"
+        : String(rawLanguage).trim().toLowerCase();
     if (!COACH_REQUEST_LANGUAGES.includes(language)) {
       return res.status(400).json({
         success: false,
@@ -417,7 +426,8 @@ export const askCoach = async (req, res) => {
     if (!process.env.GEMINI_API_KEY || !process.env.GEMINI_MODEL) {
       return res.status(503).json({
         success: false,
-        message: "AI coach is not configured right now. Please try again later.",
+        message:
+          "AI coach is not configured right now. Please try again later.",
       });
     }
 
@@ -447,7 +457,8 @@ export const askCoach = async (req, res) => {
       console.error("Coach model returned unusable output.");
       return res.status(502).json({
         success: false,
-        message: "The AI coach gave an unclear answer. Please try asking again.",
+        message:
+          "The AI coach gave an unclear answer. Please try asking again.",
       });
     }
 

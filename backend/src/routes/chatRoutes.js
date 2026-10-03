@@ -2,7 +2,6 @@ import express from "express";
 import {
   getMessages,
   getOneMessage,
-  createMessage,
   deleteMessage,
   deleteMessages,
 } from "../controllers/chatControllers.js";
@@ -17,8 +16,6 @@ chatRouter.get("/", authMiddleware, getMessages);
 chatRouter.delete("/", authMiddleware, deleteMessages);
 
 chatRouter.get("/:id", authMiddleware, getOneMessage);
-
-chatRouter.post("/", authMiddleware, createMessage);
 
 chatRouter.delete("/:id", authMiddleware, deleteMessage);
 

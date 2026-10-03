@@ -19,7 +19,14 @@ export function toApiError(error, fallback) {
 export function useLatestInsights() {
   return useQuery({
     queryKey: ["ai", "latest-insights"],
-    queryFn: async () => (await api.get("/api/ai/latest-insights")).data,
+    queryFn: async () => {
+      try {
+        return (await api.get("/api/ai/latest-insights")).data;
+      } catch (error) {
+        if (error?.response?.status === 404) return null; // never generated
+        throw error;
+      }
+    },
     retry: (count, error) => (error?.response?.status ?? 0) >= 500 && count < 1,
   });
 }

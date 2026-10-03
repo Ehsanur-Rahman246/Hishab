@@ -32,6 +32,7 @@ const useTransactionMutation = (fn) => {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["transactions"] });
       qc.invalidateQueries({ queryKey: ["summaries"] });
+      qc.invalidateQueries({ queryKey: ["wallet"] });
     },
   });
 };
