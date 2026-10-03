@@ -17,7 +17,21 @@ export const loginRateLimit = rateLimit({
   },
 });
 
-// Optional: general limiter for register
+// AI coach limiter: 10 questions per 10 minutes per user (falls back to IP).
+// Placed after authMiddleware on the route so req.user is available.
+export const coachRateLimit = rateLimit({
+  windowMs: 10 * 60 * 1000, // 10 minutes
+  limit: 10, // 10 requests per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    req.user?.userId ? String(req.user.userId) : ipKeyGenerator(req.ip),
+  message: {
+    success: false,
+    message:
+      "Too many questions. Please wait a few minutes before asking again. / অতিরিক্ত প্রশ্ন করা হয়েছে। কয়েক মিনিট পর আবার চেষ্টা করুন।",
+  },
+});
 export const authRateLimit = rateLimit({
   windowMs: 5 * 60 * 1000,
   limit: 20,
