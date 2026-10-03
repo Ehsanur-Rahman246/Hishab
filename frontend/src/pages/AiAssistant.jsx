@@ -65,7 +65,7 @@ function worstRisk(rows) {
   return 'low'
 }
 
-export function AiInsightsPage() {
+const AiAssistant = () => {
   // `live` holds the last freshly generated analysis (this session).
   // `latest` holds the last snapshot saved in MongoDB.
   const [live, setLive] = useState(null)
@@ -235,4 +235,6 @@ export function AiInsightsPage() {
       <AiCoach />
     </main>
   )
-}
+};
+
+export default AiAssistant;

@@ -1,6 +1,7 @@
 import express from "express";
 import {
   deleteAccount,
+  getMe,
   login,
   logout,
   register,
@@ -14,5 +15,6 @@ authRouter.post("/register", authRateLimit, register);
 authRouter.post("/login", loginRateLimit, login);
 authRouter.post("/logout", logout);
 authRouter.delete("/delete-account", authMiddleware, authRateLimit, deleteAccount);
+authRouter.get("/me", authMiddleware, getMe);
 
 export default authRouter;

@@ -1,9 +1,9 @@
-import { AiInsightsPage } from '@/pages/AiInsightsPage'
+import AppRoutes from '@/AppRoutes'
 
 const App = () => {
   return (
     <div className="min-h-svh bg-background text-foreground">
-      <AiInsightsPage />
+      <AppRoutes />
     </div>
   )
 }

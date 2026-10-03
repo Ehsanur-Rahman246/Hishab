@@ -1,0 +1,190 @@
+{
+  "communities": {
+    "0": [
+      "backend_package",
+      "backend_package_author",
+      "backend_package_description",
+      "backend_package_devdependencies",
+      "backend_package_devdependencies_nodemon",
+      "backend_package_keywords",
+      "backend_package_license",
+      "backend_package_main",
+      "backend_package_name",
+      "backend_package_scripts",
+      "backend_package_scripts_dev",
+      "backend_package_scripts_start",
+      "backend_package_type",
+      "backend_package_version",
+      "ref_bcryptjs",
+      "ref_cookie_parser",
+      "ref_cors",
+      "ref_dotenv",
+      "ref_express",
+      "ref_jsonwebtoken",
+      "ref_mongoose",
+      "ref_nodemon"
+    ],
+    "1": [
+      "frontend_package",
+      "frontend_package_name",
+      "frontend_package_private",
+      "frontend_package_type",
+      "frontend_package_version",
+      "ref_axios",
+      "ref_babel_core",
+      "ref_babel_plugin_react_compiler",
+      "ref_formik",
+      "ref_react_hot_toast",
+      "ref_react_icons",
+      "ref_react_router",
+      "ref_recharts",
+      "ref_tailwindcss",
+      "ref_tailwindcss_vite",
+      "ref_tanstack_react_query",
+      "ref_types_react",
+      "ref_types_react_dom",
+      "ref_yup"
+    ],
+    "2": [
+      "frontend_package_dependencies",
+      "frontend_package_dependencies_axios",
+      "frontend_package_dependencies_formik",
+      "frontend_package_dependencies_react",
+      "frontend_package_dependencies_react_dom",
+      "frontend_package_dependencies_react_hot_toast",
+      "frontend_package_dependencies_react_icons",
+      "frontend_package_dependencies_react_router",
+      "frontend_package_dependencies_recharts",
+      "frontend_package_dependencies_tailwindcss",
+      "frontend_package_dependencies_tailwindcss_vite",
+      "frontend_package_dependencies_tanstack_react_query",
+      "frontend_package_dependencies_yup"
+    ],
+    "3": [
+      "frontend_package_devdependencies",
+      "frontend_package_devdependencies_babel_core",
+      "frontend_package_devdependencies_babel_plugin_react_compiler",
+      "frontend_package_devdependencies_eslint",
+      "frontend_package_devdependencies_eslint_js",
+      "frontend_package_devdependencies_eslint_plugin_react_hooks",
+      "frontend_package_devdependencies_eslint_plugin_react_refresh",
+      "frontend_package_devdependencies_globals",
+      "frontend_package_devdependencies_rolldown_plugin_babel",
+      "frontend_package_devdependencies_types_react",
+      "frontend_package_devdependencies_types_react_dom",
+      "frontend_package_devdependencies_vite",
+      "frontend_package_devdependencies_vitejs_plugin_react"
+    ],
+    "4": [
+      "backend_package_dependencies",
+      "backend_package_dependencies_bcryptjs",
+      "backend_package_dependencies_cookie_parser",
+      "backend_package_dependencies_cors",
+      "backend_package_dependencies_dotenv",
+      "backend_package_dependencies_express",
+      "backend_package_dependencies_jsonwebtoken",
+      "backend_package_dependencies_mongoose"
+    ],
+    "5": [
+      "frontend_eslint_config",
+      "ref_eslint",
+      "ref_eslint_js",
+      "ref_eslint_plugin_react_hooks",
+      "ref_eslint_plugin_react_refresh",
+      "ref_globals"
+    ],
+    "6": [
+      "frontend_src_app",
+      "frontend_src_app_app",
+      "frontend_src_index",
+      "frontend_src_main",
+      "ref_react",
+      "ref_react_dom"
+    ],
+    "7": [
+      "frontend_package_scripts",
+      "frontend_package_scripts_build",
+      "frontend_package_scripts_dev",
+      "frontend_package_scripts_lint",
+      "frontend_package_scripts_preview"
+    ],
+    "8": [
+      "frontend_vite_config",
+      "ref_rolldown_plugin_babel",
+      "ref_vite",
+      "ref_vitejs_plugin_react"
+    ],
+    "9": [
+      "backend_src_server"
+    ]
+  },
+  "cohesion": {
+    "0": 0.09090909090909091,
+    "1": 0.10526315789473684,
+    "2": 0.15384615384615385,
+    "3": 0.15384615384615385,
+    "4": 0.25,
+    "5": 0.3333333333333333,
+    "6": 0.4,
+    "7": 0.4,
+    "8": 0.5,
+    "9": 1.0
+  },
+  "gods": [
+    {
+      "id": "frontend_package_scripts",
+      "label": "scripts",
+      "degree": 5
+    },
+    {
+      "id": "backend_package_scripts",
+      "label": "scripts",
+      "degree": 3
+    },
+    {
+      "id": "ref_react",
+      "label": "react",
+      "degree": 2
+    },
+    {
+      "id": "ref_react_dom",
+      "label": "react-dom",
+      "degree": 2
+    },
+    {
+      "id": "ref_eslint_js",
+      "label": "@eslint/js",
+      "degree": 2
+    },
+    {
+      "id": "ref_rolldown_plugin_babel",
+      "label": "@rolldown/plugin-babel",
+      "degree": 2
+    },
+    {
+      "id": "ref_vitejs_plugin_react",
+      "label": "@vitejs/plugin-react",
+      "degree": 2
+    },
+    {
+      "id": "ref_eslint",
+      "label": "eslint",
+      "degree": 2
+    },
+    {
+      "id": "ref_eslint_plugin_react_hooks",
+      "label": "eslint-plugin-react-hooks",
+      "degree": 2
+    },
+    {
+      "id": "ref_eslint_plugin_react_refresh",
+      "label": "eslint-plugin-react-refresh",
+      "degree": 2
+    }
+  ],
+  "surprises": [],
+  "tokens": {
+    "input": 0,
+    "output": 0
+  }
+}
