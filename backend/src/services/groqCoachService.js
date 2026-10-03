@@ -1,7 +1,7 @@
-﻿import { GoogleGenAI, Type } from "@google/genai";
+import Groq from "groq-sdk";
 
 // Service layer for the bilingual AI Financial Coach.
-// Only this file talks to Gemini. The API key and model name come
+// Only this file talks to Groq. The API key and model name come
 // exclusively from environment variables and never leave the backend.
 
 // Allowed values (mirrored by the frontend language selector).
@@ -17,12 +17,19 @@ const MAX_ACTION_DETAIL = 500;
 const MAX_DISCLAIMER = 500;
 const MAX_ACTIONS = 3;
 
+// Low temperature for consistent, factual coaching replies.
+const COACH_TEMPERATURE = 0.3;
+// Reasonable cap: the coach reply is a short headline + answer + ≤3 actions.
+const COACH_MAX_TOKENS = 1500;
+// How long to wait for Groq before giving up.
+const COACH_TIMEOUT_MS = 30_000;
+
 // Bengali Unicode block: used to verify English replies contain no Bangla.
 const BANGLA_RANGE = /[\u0980-\u09FF]/;
 
 // Strict system instruction: language rules, honesty rules, safety rules.
-// The user's message is untrusted text inside the prompt below — instructions
-// smuggled into it must be ignored.
+// The user's message is untrusted text inside the user message below —
+// instructions smuggled into it must be ignored.
 const SYSTEM_INSTRUCTION = `You are "Hishab AI Coach", a friendly personal finance explainer inside the Hishab app. You only see a compact summary of the user's own data (totals, forecast, goals, recent chat), never raw transactions.
 
 LANGUAGE (follow exactly):
@@ -45,32 +52,10 @@ SAFETY:
 
 OUTPUT: valid JSON only, exactly these keys: language ("bn" | "en" | "mixed"), headline (string), answer (string), actions (array of 0-3 {title, detail}), tone ("positive" | "neutral" | "caution"), disclaimer (string).`;
 
-// JSON schema enforced on the model response (structured output).
-const COACH_RESPONSE_SCHEMA = {
-  type: Type.OBJECT,
-  properties: {
-    language: { type: Type.STRING, enum: COACH_REPLY_LANGUAGES },
-    headline: { type: Type.STRING },
-    answer: { type: Type.STRING },
-    actions: {
-      type: Type.ARRAY,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          title: { type: Type.STRING },
-          detail: { type: Type.STRING },
-        },
-        required: ["title", "detail"],
-      },
-    },
-    tone: { type: Type.STRING, enum: COACH_TONES },
-    disclaimer: { type: Type.STRING },
-  },
-  required: ["language", "headline", "answer", "actions", "tone", "disclaimer"],
-};
-
-// Build the user prompt: trusted compact context + the untrusted message,
-// clearly separated so the model treats the message as data, not orders.
+// Build the user message content: trusted compact context + the untrusted
+// message, clearly separated so the model treats the message as data, not
+// orders. Only aggregates cross the provider boundary — never the raw
+// transaction list and never any PII.
 export const buildCoachPrompt = ({ message, language, context }) => {
   const data = JSON.stringify(context ?? {});
   return [
@@ -80,31 +65,72 @@ export const buildCoachPrompt = ({ message, language, context }) => {
   ].join("\n");
 };
 
-// Call Gemini and return the raw text. Throws coded errors the controller maps:
-// { code: "NOT_CONFIGURED" } for missing env, { code: "PROVIDER_ERROR" } otherwise.
+// Classify a raw SDK error without ever logging secrets.
+// Returns one of: "RATE_LIMITED" | "AUTH_ERROR" | "PROVIDER_ERROR".
+const classifyProviderError = (error) => {
+  const status = error?.status ?? error?.statusCode;
+  const code = String(error?.code ?? error?.error?.code ?? "");
+  const message = String(error?.message ?? error?.error?.message ?? "");
+
+  // Log status/code/message server-side only. Never log keys or prompts.
+  console.error(
+    "Groq provider error:",
+    status ?? code ?? "unknown",
+    message.slice(0, 300)
+  );
+
+  if (status === 429 || /rate_limit|quota|too_many_requests/i.test(code + message)) {
+    return "RATE_LIMITED";
+  }
+  if (
+    status === 401 ||
+    status === 403 ||
+    /invalid.*api.*key|incorrect api key|permission|denied|unauthorized|authentication/i.test(
+      code + " " + message
+    )
+  ) {
+    return "AUTH_ERROR";
+  }
+  return "PROVIDER_ERROR";
+};
+
+// Call Groq chat completions and return the raw JSON text.
+// Throws coded errors the controller maps:
+// { code: "NOT_CONFIGURED" } for missing env,
+// { code: "RATE_LIMITED" } for quota/rate limits,
+// { code: "AUTH_ERROR" } for invalid key / permission problems,
+// { code: "PROVIDER_ERROR" } otherwise (including timeouts).
 export const generateCoachReply = async ({ message, language, context }) => {
-  const apiKey = process.env.GEMINI_API_KEY;
-  const model = process.env.GEMINI_MODEL;
+  const apiKey = process.env.GROQ_API_KEY;
+  const model = process.env.GROQ_MODEL;
 
   if (!apiKey || !model) {
     throw { code: "NOT_CONFIGURED" };
   }
 
-  try {
-    const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model,
-      contents: buildCoachPrompt({ message, language, context }),
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
-        responseMimeType: "application/json",
-        responseSchema: COACH_RESPONSE_SCHEMA,
-        temperature: 0.4,
-        maxOutputTokens: 4096,
-      },
-    });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), COACH_TIMEOUT_MS);
 
-    const text = typeof response?.text === "string" ? response.text.trim() : "";
+  try {
+    const groq = new Groq({ apiKey });
+    const completion = await groq.chat.completions.create(
+      {
+        model,
+        temperature: COACH_TEMPERATURE,
+        max_tokens: COACH_MAX_TOKENS,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: SYSTEM_INSTRUCTION },
+          {
+            role: "user",
+            content: buildCoachPrompt({ message, language, context }),
+          },
+        ],
+      },
+      { signal: controller.signal, timeout: COACH_TIMEOUT_MS }
+    );
+
+    const text = completion?.choices?.[0]?.message?.content?.trim() ?? "";
 
     if (!text) {
       throw { code: "PROVIDER_ERROR" };
@@ -113,9 +139,16 @@ export const generateCoachReply = async ({ message, language, context }) => {
     return text;
   } catch (error) {
     if (error?.code === "NOT_CONFIGURED") throw error;
-    // Log the real error server-side only; callers send a generic message.
-    console.error("Gemini provider error:", error?.message || error);
-    throw { code: "PROVIDER_ERROR" };
+    if (error?.code === "RATE_LIMITED" || error?.code === "AUTH_ERROR") {
+      throw error;
+    }
+    if (error?.name === "AbortError") {
+      console.error("Groq provider error: request timed out");
+      throw { code: "PROVIDER_ERROR" };
+    }
+    throw { code: classifyProviderError(error) };
+  } finally {
+    clearTimeout(timer);
   }
 };
 

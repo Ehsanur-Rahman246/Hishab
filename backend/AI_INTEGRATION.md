@@ -205,39 +205,43 @@ Failures (no stack traces are ever sent to clients):
 | File | Purpose |
 | ---- | ------- |
 | `src/controllers/aiControllers.js` | `analyzeTransactions` (+ snapshot save), `getLatestInsights`, `askCoach`, `checkAiHealth`, timeout + error mapping |
-| `src/services/geminiCoachService.js` | Gemini SDK calls, strict system prompt, JSON validation (never sees DB code) |
+| `src/services/groqCoachService.js` | Groq SDK chat completions, strict system prompt, JSON validation (never sees DB code) |
 | `src/middleware/rateLimit.js` | `coachRateLimit`: 10 questions / 10 min per user |
 | `src/routes/aiRoutes.js` | `GET /health`, `POST /analyze`, `GET /latest-insights`, `POST /coach` (all behind `authMiddleware`) |
 | `src/server.js` | mounts router at `/api/ai` |
-| `.env.example` | documents `AI_SERVICE_URL`, `GEMINI_API_KEY`, `GEMINI_MODEL` (placeholders only, no real secrets) |
+| `.env.example` | documents `AI_SERVICE_URL`, `GROQ_API_KEY`, `GROQ_MODEL` (placeholders only, no real secrets) |
 | `../frontend/src/pages/AiInsightsPage.jsx` | “AI Financial Insights” dashboard (live + saved data) |
 | `../frontend/src/components/ai/` | `RiskBadge`, `OverallRiskCard`, `ForecastSection`, `UnusualExpenses`, `DataQualityNotice`, `InsightsSkeleton`, `AiCoach` |
 | `../frontend/src/hooks/useAiInsights.js` | react-query hooks (cookie-auth axios client in `lib/api.js`, Taka formatting in `lib/format.js`) |
 | `../frontend/src/hooks/useAiCoach.js` | `useAskCoach` mutation (`POST /api/ai/coach`) |
 
-## AI Coach (Gemini, bilingual)
+## AI Coach (Groq, bilingual)
 
-Secure flow — React never calls Gemini, the key never leaves the backend:
+Secure flow — React never calls Groq, the key never leaves the backend:
 
 ```text
 React "Ask Hishab AI" (JWT cookie, { message, language })
   ▼
 Node POST /api/ai/coach (auth → coachRateLimit → askCoach)
   │  1. Validate message (≤500 chars) + language (auto/bn/en)
-  │  2. Build trusted context: totals, top-5 categories, latest snapshot,
+  │  2. Count this user's transactions: zero → deterministic local
+  │     no-data reply (HTTP 200, same coach shape, never saved, no
+  │     provider call)
+  │  3. Build trusted context: totals, top-5 categories, latest snapshot,
   │     5 largest recent expenses (honestly labelled, NOT ML flags),
   │     active goals, last 8 chat messages — never raw transactions or PII
-  │  3. Gemini (system prompt + structured JSON) → server-side validation
-  │  4. Save user + assistant texts to ChatMessage (validated only)
+  │  4. Groq chat completions (system rules + JSON object mode,
+  │     temperature ~0.3) → server-side validation
+  │  5. Save user + assistant texts to ChatMessage (validated only)
   ▼
 React renders headline / answer / action cards / disclaimer
 ```
 
-Local Gemini setup (`backend/.env` — real values stay local, never committed):
+Local Groq setup (`backend/.env` — real values stay local, never committed):
 
 ```text
-GEMINI_API_KEY=... (your own key)
-GEMINI_MODEL=...  (your selected model)
+GROQ_API_KEY=... (your own key)
+GROQ_MODEL=openai/gpt-oss-20b
 ```
 
 Without both variables the endpoint returns `503` (not configured).
@@ -250,7 +254,7 @@ Auto / বাংলা / English with matching starter prompts.
 Rate limit: 10 questions per 10 minutes per user → `429` with a bilingual
 “wait a few minutes” message (Bangla + English in one string).
 
-Privacy: only aggregates cross the Gemini boundary — no transaction list, no
+Privacy: only aggregates cross the Groq boundary — no transaction list, no
 emails/phones/passwords/tokens/secrets. Chat history stores message texts only.
 
 Limitation: generated explanations may be imperfect — they interpret rough

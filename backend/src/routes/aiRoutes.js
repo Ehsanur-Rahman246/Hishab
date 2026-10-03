@@ -20,7 +20,7 @@ aiRouter.post("/analyze", authMiddleware, analyzeTransactions);
 // GET /api/ai/latest-insights -> latest saved ForecastSnapshot for this user.
 aiRouter.get("/latest-insights", authMiddleware, getLatestInsights);
 
-// POST /api/ai/coach -> bilingual AI Financial Coach (Gemini via backend only).
+// POST /api/ai/coach -> bilingual AI Financial Coach (Groq via backend only).
 // Body: { message, language? }. Rate-limited per user.
 aiRouter.post("/coach", authMiddleware, coachRateLimit, askCoach);
 
