@@ -6,6 +6,7 @@ import {
   ChartColumn,
   ChartLine,
   ChevronDown,
+  HandCoins,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -27,6 +28,7 @@ const NAV = [
   { to: "/ai-assistant", label: "AI Assistant", icon: Sparkles },
   { to: "/forecast", label: "Forecast", icon: ChartLine },
   { to: "/goals", label: "Goals", icon: Target },
+  { to: "/zakat", label: "Zakat Calculator", icon: HandCoins },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -39,6 +41,7 @@ const PAGE_TITLES = {
   "/settings": "Settings",
   "/profile": "Profile",
   "/notifications": "Notifications",
+  "/zakat": "Zakat Calculator",
 };
 
 const greetingFor = (hour) =>
@@ -213,7 +216,7 @@ export default function AppLayout() {
         <SidebarContent />
       </aside>
 
-      {/* mobile drawer */}
+{/* mobile drawer */}
       {drawer ? (
         <div className="fixed inset-0 z-50 md:hidden" role="dialog" aria-modal="true" aria-label="Navigation">
           <button

@@ -12,6 +12,7 @@ import summaryRouter from "./routes/summaryRoutes.js";
 import forecastRouter from "./routes/forecastRoutes.js";
 import chatRouter from "./routes/chatRoutes.js";
 import aiRouter from "./routes/aiRoutes.js";
+import zakatRouter from "./routes/zakatRoutes.js";
 
 const app = express();
 
@@ -35,6 +36,7 @@ app.use("/api/summaries", summaryRouter);
 app.use("/api/forecasts", forecastRouter);
 app.use("/api/chat", chatRouter);
 app.use("/api/ai", aiRouter);
+app.use("/api/zakat", zakatRouter);
 
 app.use((_, res) => {
   res.status(404).json({

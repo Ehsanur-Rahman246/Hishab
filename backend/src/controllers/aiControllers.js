@@ -9,6 +9,10 @@ import {
   generateCoachReply,
   parseAndValidateCoachJson,
 } from "../services/groqCoachService.js";
+import {
+  getActiveAlertsForCoach,
+  syncMlAlerts,
+} from "../services/mlAlertService.js";
 
 // Base URL of the FastAPI AI service.
 // Set AI_SERVICE_URL in backend/.env. Falls back to local default for dev.
@@ -224,8 +228,24 @@ export const analyzeTransactions = async (req, res) => {
         });
       }
 
-      // Backward-compatible: every previous field is untouched, one added.
+      // Backward-compatible: every previous field is untouched, two added.
       analysis.savedForecastId = String(snapshot._id);
+
+      // Convert fresh ML results into deduplicated in-app notifications.
+      // Alert sync never fails the analysis: problems are logged and the
+      // analysis is still returned with an empty summary.
+      let alertSummary = { created: 0, total: 0 };
+      try {
+        alertSummary = await syncMlAlerts({
+          userId,
+          weeks,
+          unusualExpenses: analysis?.mlInsights?.unusualExpenses,
+        });
+      } catch (error) {
+        console.error("Failed to sync ML alerts:", error);
+      }
+      analysis.alertSummary = alertSummary;
+
       return res.status(200).json(analysis);
     } catch (error) {
       console.error("Failed to save forecast snapshot:", error);
@@ -287,7 +307,7 @@ const buildCoachContext = async (userId) => {
   const userOid = new mongoose.Types.ObjectId(userId);
   const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
 
-  const [totalsAgg, topCats, snapshot, goals, history, notable] =
+  const [totalsAgg, topCats, snapshot, goals, history, notable, activeAlerts] =
     await Promise.all([
       // Total income vs expense for this user.
       Transaction.aggregate([
@@ -327,6 +347,9 @@ const buildCoachContext = async (userId) => {
         .limit(5)
         .select("category amount date description")
         .lean(),
+      // Latest unread shortfall/anomaly alerts already shown in-app.
+      // The coach may explain these but must never invent new ones.
+      getActiveAlertsForCoach(userId),
     ]);
 
   const totalOf = (type) =>
@@ -385,6 +408,7 @@ const buildCoachContext = async (userId) => {
       .reverse()
       .filter((m) => m.role === "user" || m.role === "assistant")
       .map((m) => ({ role: m.role, text: String(m.text).slice(0, 500) })),
+    activeAlerts: Array.isArray(activeAlerts) ? activeAlerts : [],
   };
 };
 

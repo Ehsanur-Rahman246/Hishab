@@ -16,6 +16,7 @@ import {
   RefreshCw,
   Target,
   Trash2,
+  TrendingDown,
   TrendingUp,
   TriangleAlert,
   Wallet,
@@ -46,6 +47,7 @@ const TYPES = {
   budget: { label: "Budget", icon: PiggyBank },
   savings_goal: { label: "Savings goal", icon: Target },
   unusual_spending: { label: "Unusual spending", icon: TriangleAlert },
+  future_shortfall: { label: "Future shortfall", icon: TrendingDown },
   other: { label: "General", icon: Bell },
 };
 
