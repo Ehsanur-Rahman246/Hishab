@@ -112,12 +112,24 @@ export default function AppLayout() {
               key={to}
               to={to}
               end={to === "/dashboard"}
-              aria-label={label}
+              aria-label={
+                to === "/notifications" && unread > 0
+                  ? `${label}, ${unread} unread`
+                  : label
+              }
               className={({ isActive }) =>
-                `p-2 ${isActive ? "text-primary" : "text-muted-foreground"}`
+                `relative p-2 ${isActive ? "text-primary" : "text-muted-foreground"}`
               }
             >
               <Icon className="size-5" />
+              {to === "/notifications" && unread > 0 && (
+                <span
+                  className="absolute -top-0.5 -right-0.5 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] leading-none font-bold text-white"
+                  aria-hidden="true"
+                >
+                  {unread > 9 ? "9+" : unread}
+                </span>
+              )}
             </NavLink>
           ),
         )}

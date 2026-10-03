@@ -75,6 +75,32 @@ Health check follows the same proxied path:
 `GET /api/ai/latest-insights` returns `{ success: true, forecast }` with the
 newest snapshot for the JWT user, or `404` when they never generated one.
 
+## ML alerts → Notifications
+
+`POST /api/ai/analyze` also converts fresh ML results into deduplicated
+in-app alerts (see `src/services/mlAlertService.js` — no new ML model):
+
+- **Future shortfall** (`type: future_shortfall`, severity `high`): one alert
+  per forecast week whose `shortfallRisk` is `high` **or** whose cumulative
+  `predictedBalance` is negative. The message names the week date, the
+  estimated balance/shortfall in BDT, and links to `/ai-assistant`.
+- **Spending anomaly** (`type: unusual_spending`, severity `medium`): one
+  alert per entry in `mlInsights.unusualExpenses` (detector output only —
+  the "largest recent expenses" list is never labelled an anomaly), with
+  category, amount, date, and the detector's explanation.
+
+Deduplication: each alert carries a `sourceKey` (`shortfall:<YYYY-MM-DD>` or
+`anomaly:<date>:<category>:<amount>:<description>`). Sync uses
+`updateOne` + `$setOnInsert` + upsert plus a sparse unique index on
+`{ user, sourceKey }`, so repeated Refresh clicks create nothing new (read
+state preserved) while new weeks or newly flagged purchases create new
+alerts. The response includes `alertSummary: { created, total }`.
+Ownership is enforced everywhere (`{ _id, user }` filters + `authMiddleware`).
+
+The coach sees the latest unread shortfall/anomaly alerts as compact
+`activeAlerts` context and may explain them, but must never invent new
+anomalies or risks (system prompt rule).
+
 ## Running locally
 
 Terminal 1 — AI service:
