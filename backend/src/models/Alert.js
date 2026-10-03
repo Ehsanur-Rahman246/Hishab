@@ -63,6 +63,11 @@ const alertSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+
+    dedupeKey: {
+      type: String,
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -70,6 +75,11 @@ const alertSchema = new mongoose.Schema(
 );
 
 alertSchema.index({ user: 1, read: 1, createdAt: -1 });
+
+alertSchema.index(
+  { user: 1, dedupeKey: 1 },
+  { unique: true, partialFilterExpression: { dedupeKey: { $type: "string" } } },
+);
 
 const Alert = mongoose.model("Alert", alertSchema);
 

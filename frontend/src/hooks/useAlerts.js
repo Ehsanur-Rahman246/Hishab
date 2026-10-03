@@ -6,10 +6,13 @@ import {
   markAllAlertsRead,
   resolveAlert,
   deleteAlert,
+  refreshAlerts,
 } from "../api/alertApi";
 
 export const useAlerts = () =>
   useQuery({ queryKey: ["alerts"], queryFn: getAlerts });
+
+export const useRefreshAlerts = () => useAlertMutation(refreshAlerts);
 
 export const useAlert = (id) =>
   useQuery({
