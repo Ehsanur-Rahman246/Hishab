@@ -8,7 +8,7 @@ import {
   COACH_REQUEST_LANGUAGES,
   generateCoachReply,
   parseAndValidateCoachJson,
-} from "../services/geminiCoachService.js";
+} from "../services/groqCoachService.js";
 
 // Base URL of the FastAPI AI service.
 // Set AI_SERVICE_URL in backend/.env. Falls back to local default for dev.
@@ -280,7 +280,7 @@ export const getLatestInsights = async (req, res) => {
   }
 };
 
-// Helper: build the compact, trusted context sent to Gemini.
+// Helper: build the compact, trusted context sent to Groq.
 // Aggregates only — the full raw transaction list is NEVER included,
 // and neither is any PII (no emails, phones, passwords, tokens, or secrets).
 const buildCoachContext = async (userId) => {
@@ -388,6 +388,121 @@ const buildCoachContext = async (userId) => {
   };
 };
 
+// Bangla Unicode block for the deterministic no-data fallback language pick.
+const FALLBACK_BANGLA_RANGE = /[\u0980-\u09FF]/;
+const FALLBACK_LATIN_RANGE = /[A-Za-z]/;
+
+// Common Bangla words written in Latin script (Banglish). Used only for the
+// local no-data fallback so an "auto" Banglish question gets a mixed reply
+// instead of a pure-English one. The live Groq path lets the model decide.
+const BANGLISH_HINT =
+  /\b(amar|amader|tomar|apnar|apni|tumi|ki|kivabe|keno|koto|kototuku|jomano|joma|kharcha|khoroch|maas|mash|soptaho|dine|protidin|bazaar|bhat|bari|basa|eid|puja|boishakh)\b/i;
+
+// Pick the reply language for the local no-data fallback.
+// Explicit bn/en are honored; "auto" matches the message like the live coach:
+// Bangla script -> bn, Bangla+Latin mix or Banglish -> mixed, else en.
+const pickFallbackLanguage = (requestedLanguage, message) => {
+  if (requestedLanguage === "bn" || requestedLanguage === "en") {
+    return requestedLanguage;
+  }
+  const hasBangla = FALLBACK_BANGLA_RANGE.test(message);
+  const hasLatin = FALLBACK_LATIN_RANGE.test(message);
+  if (hasBangla && hasLatin) return "mixed";
+  if (hasBangla) return "bn";
+  if (BANGLISH_HINT.test(message)) return "mixed";
+  return "en";
+};
+
+// Deterministic local reply for users with zero transactions.
+// Same { coach } shape as the live endpoint, so the UI renders unchanged.
+// Never calls the provider and is never saved to ChatMessage.
+const buildNoDataCoach = (requestedLanguage, message) => {
+  const language = pickFallbackLanguage(requestedLanguage, message);
+
+  if (language === "bn") {
+    return {
+      language: "bn",
+      headline: "এখনো কোনো লেনদেন যোগ হয়নি",
+      answer:
+        "আপনার অ্যাকাউন্টে এখনো কোনো লেনদেন নেই, তাই আমি এখনো ব্যক্তিগত বিশ্লেষণ দিতে পারছি না। নিচের ধাপগুলো শেষ করে আবার জিজ্ঞেস করুন।",
+      actions: [
+        {
+          title: "আয় যোগ করুন",
+          detail:
+            "Transactions পেজে গিয়ে আপনার প্রথম আয় (যেমন বেতন) যোগ করুন।",
+        },
+        {
+          title: "প্রতিদিনের খরচ যোগ করুন",
+          detail:
+            "খাবার ও যাতায়াতসহ কয়েক দিনের ছোট ছোট খরচ যোগ করুন।",
+        },
+        {
+          title: "Refresh Insights চাপুন",
+          detail:
+            "লেনদেন যোগ করার পর AI Assistant পেজে Refresh Insights চাপুন, তারপর আবার প্রশ্ন করুন।",
+        },
+      ],
+      tone: "neutral",
+      disclaimer:
+        "এটি আপনার অতীত লেনদেনের ভিত্তিতে একটি আনুমানিক ব্যাখ্যা, আর্থিক পরামর্শ নয়।",
+    };
+  }
+
+  if (language === "mixed") {
+    return {
+      language: "mixed",
+      headline: "Ekhono kono transaction nei",
+      answer:
+        "Apnar account-e ekhono kono transaction add hoyni, tai ami ekhono personal analysis dite parchi na. Nicher step-gulo complete kore abar ask korun.",
+      actions: [
+        {
+          title: "Income add korun",
+          detail: "Transactions page-e giye apnar prothom income (jemon salary) add korun.",
+        },
+        {
+          title: "Daily khoroch add korun",
+          detail: "Khabar o jatayat-soho koyek diner chhoto chhoto khoroch add korun.",
+        },
+        {
+          title: "Refresh Insights press korun",
+          detail:
+            "Transaction add korar por AI Assistant page-e Refresh Insights press korun, tarpor abar question korun.",
+        },
+      ],
+      tone: "neutral",
+      disclaimer:
+        "Eta apnar past transaction-er upor base kore ekta estimate, financial advice na.",
+    };
+  }
+
+  return {
+    language: "en",
+    headline: "No transactions yet",
+    answer:
+      "Your account has no transactions so far, so I cannot give a personal analysis yet. Complete the steps below, then ask me again.",
+    actions: [
+      {
+        title: "Add your income",
+        detail:
+          "Go to the Transactions page and add your first income, such as your salary.",
+      },
+      {
+        title: "Add daily expenses",
+        detail:
+          "Add a few days of small expenses, including food and transport.",
+      },
+      {
+        title: "Click Refresh Insights",
+        detail:
+          "After adding transactions, click Refresh Insights on the AI Assistant page, then ask your question again.",
+      },
+    ],
+    tone: "neutral",
+    disclaimer:
+      "This is an estimate based on past transactions, not financial advice.",
+  };
+};
+
 // POST /api/ai/coach (protected)
 // Bilingual AI Financial Coach. Accepts ONLY { message, language }.
 // The user is identified via req.user.userId; all context is built
@@ -423,7 +538,18 @@ export const askCoach = async (req, res) => {
       });
     }
 
-    if (!process.env.GEMINI_API_KEY || !process.env.GEMINI_MODEL) {
+    // No-data fallback: never call the provider when there is nothing to
+    // analyze. This deterministic reply is not saved to chat history.
+    const transactionCount = await Transaction.countDocuments({
+      user: userId,
+    });
+    if (transactionCount === 0) {
+      return res
+        .status(200)
+        .json({ success: true, coach: buildNoDataCoach(language, message) });
+    }
+
+    if (!process.env.GROQ_API_KEY || !process.env.GROQ_MODEL) {
       return res.status(503).json({
         success: false,
         message:
@@ -442,6 +568,21 @@ export const askCoach = async (req, res) => {
           success: false,
           message:
             "AI coach is not configured right now. Please try again later.",
+        });
+      }
+      if (error?.code === "RATE_LIMITED") {
+        return res.status(429).json({
+          success: false,
+          message:
+            "The AI coach is busy right now. Please wait a moment and try again.",
+        });
+      }
+      if (error?.code === "AUTH_ERROR") {
+        console.error("AI coach provider auth/permission failure.");
+        return res.status(503).json({
+          success: false,
+          message:
+            "AI coach is temporarily unavailable. Please try again in a moment.",
         });
       }
       return res.status(503).json({

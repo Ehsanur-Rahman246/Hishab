@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useNavigate } from "react-router";
+import { Link, NavLink, Outlet, useNavigate } from "react-router";
 import {
   LayoutDashboard,
   ArrowLeftRight,
@@ -10,12 +10,13 @@ import {
   User,
   Settings,
   LogOut,
+  Wallet,
 } from "lucide-react";
 import { useLogout } from "@/hooks/useAuth";
 import { useAlerts } from "@/hooks/useAlerts";
 
 const mainNav = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/transactions", label: "Transactions", icon: ArrowLeftRight },
   { to: "/analytics", label: "Analytics", icon: ChartPie },
   { to: "/ai-assistant", label: "AI Assistant", icon: Bot },
@@ -50,7 +51,7 @@ export default function AppLayout() {
   };
 
   const renderLink = ({ to, label, icon: Icon, badge }) => (
-    <NavLink key={to} to={to} end={to === "/"} className={linkClass}>
+    <NavLink key={to} to={to} end={to === "/dashboard"} className={linkClass}>
       <Icon className="size-4" />
       <span className="flex-1">{label}</span>
       {badge && unread > 0 && (
@@ -65,7 +66,21 @@ export default function AppLayout() {
     <div className="flex min-h-svh">
       {/* desktop sidebar */}
       <aside className="sticky top-0 hidden h-svh w-60 shrink-0 flex-col border-r bg-card p-4 md:flex">
-        <div className="mb-6 px-3 text-lg font-semibold">upay Rhythm</div>
+        <Link
+          to="/dashboard"
+          className="mb-6 flex items-center gap-2 px-3"
+          aria-label="Hishab dashboard"
+        >
+          <span
+            className="flex size-8 items-center justify-center rounded-lg bg-[#0756A6] text-white"
+            aria-hidden="true"
+          >
+            <Wallet className="size-4" />
+          </span>
+          <span className="font-heading text-lg font-extrabold tracking-tight">
+            Hishab<span className="text-[#0756A6]">.</span>
+          </span>
+        </Link>
 
         <nav className="flex flex-1 flex-col gap-1">
           {mainNav.map(renderLink)}
@@ -90,13 +105,13 @@ export default function AppLayout() {
       </main>
 
       {/* mobile bottom nav */}
-      <nav className="fixed inset-x-0 bottom-0 z-40 flex justify-around border-t bg-card py-2 md:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-40 flex justify-around border-t bg-card py-2 md:hidden" aria-label="Primary mobile">
         {[...mainNav.slice(0, 4), secondaryNav[0]].map(
           ({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
               to={to}
-              end={to === "/"}
+              end={to === "/dashboard"}
               aria-label={label}
               className={({ isActive }) =>
                 `p-2 ${isActive ? "text-primary" : "text-muted-foreground"}`
