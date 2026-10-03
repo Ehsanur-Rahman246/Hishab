@@ -312,7 +312,7 @@ const buildCoachContext = async (userId) => {
         .lean(),
       // Latest 8 chat messages, oldest first, role + text only.
       ChatMessage.find({ user: userId })
-        .sort({ createdAt: -1 })
+        .sort({ createdAt: -1, _id: -1 })
         .limit(8)
         .select("role text")
         .lean(),
@@ -433,8 +433,7 @@ const buildNoDataCoach = (requestedLanguage, message) => {
         },
         {
           title: "প্রতিদিনের খরচ যোগ করুন",
-          detail:
-            "খাবার ও যাতায়াতসহ কয়েক দিনের ছোট ছোট খরচ যোগ করুন।",
+          detail: "খাবার ও যাতায়াতসহ কয়েক দিনের ছোট ছোট খরচ যোগ করুন।",
         },
         {
           title: "Refresh Insights চাপুন",
@@ -457,11 +456,13 @@ const buildNoDataCoach = (requestedLanguage, message) => {
       actions: [
         {
           title: "Income add korun",
-          detail: "Transactions page-e giye apnar prothom income (jemon salary) add korun.",
+          detail:
+            "Transactions page-e giye apnar prothom income (jemon salary) add korun.",
         },
         {
           title: "Daily khoroch add korun",
-          detail: "Khabar o jatayat-soho koyek diner chhoto chhoto khoroch add korun.",
+          detail:
+            "Khabar o jatayat-soho koyek diner chhoto chhoto khoroch add korun.",
         },
         {
           title: "Refresh Insights press korun",
@@ -605,10 +606,12 @@ export const askCoach = async (req, res) => {
 
     // Save history only after successful validation, for this user only.
     // Only the two message texts are stored — never keys, context, or prompts.
-    await ChatMessage.create([
-      { user: userId, role: "user", text: message },
-      { user: userId, role: "assistant", text: checked.coach.answer },
-    ]);
+    await ChatMessage.create({ user: userId, role: "user", text: message });
+    await ChatMessage.create({
+      user: userId,
+      role: "assistant",
+      text: checked.coach.answer,
+    });
 
     return res.status(200).json({ success: true, coach: checked.coach });
   } catch (error) {

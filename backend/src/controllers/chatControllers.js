@@ -8,6 +8,7 @@ export const getMessages = async (req, res) => {
       user: userId,
     }).sort({
       createdAt: 1,
+      _id: 1,
     });
 
     return res.status(200).json({
