@@ -64,11 +64,11 @@ const parseNonNegative = (raw, label, errors) => {
 
 function MarketBadge({ isLive }) {
   return isLive ? (
-    <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-50">
+    <Badge className="border-success/30 bg-success/10 text-success hover:bg-success/10">
       Live market data
     </Badge>
   ) : (
-    <Badge className="border-[#FFD21F] bg-[#fff6cc] text-[#5c4a00] hover:bg-[#fff6cc]">
+    <Badge className="border-[#FFD21F]/70 bg-[#fff6cc] text-[#5c4a00] dark:bg-[#FFD21F]/15 dark:text-[#FFD21F]/80">
       Reference market value
     </Badge>
   );
@@ -98,42 +98,51 @@ function MarketPanel({ market, loading, loadError }) {
       <div className="flex flex-wrap items-center gap-2">
         <MarketBadge isLive={market.isLive} />
         <span className="text-xs text-muted-foreground">
-          {market.isLive ? `Fetched ${dateLabel}` : `Reference date ${dateLabel}`}
+          {market.isLive
+            ? `Fetched ${dateLabel}`
+            : `Reference date ${dateLabel}`}
         </span>
       </div>
       <dl className="grid gap-2 sm:grid-cols-2">
-        <div className="rounded-xl bg-[#F5F7FA] px-3 py-2.5">
+        <div className="rounded-xl bg-muted px-3 py-2.5">
           <dt className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-            <Coins className="size-3.5" aria-hidden="true" /> Gold (24K) per gram
+            <Coins className="size-3.5" aria-hidden="true" /> Gold (24K) per
+            gram
           </dt>
-          <dd className="mt-0.5 text-base font-bold text-[#064581]">
+          <dd className="mt-0.5 text-base font-bold text-[#064581] dark:text-primary">
             {formatBDT(market.goldBdtPerGram)}
           </dd>
         </div>
-        <div className="rounded-xl bg-[#F5F7FA] px-3 py-2.5">
+        <div className="rounded-xl bg-muted px-3 py-2.5">
           <dt className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
             <Coins className="size-3.5" aria-hidden="true" /> Silver per gram
           </dt>
-          <dd className="mt-0.5 text-base font-bold text-[#064581]">
+          <dd className="mt-0.5 text-base font-bold text-[#064581] dark:text-primary">
             {formatBDT(market.silverBdtPerGram)}
           </dd>
         </div>
       </dl>
       <p className="text-xs text-muted-foreground">Source: {market.source}</p>
       {!market.isLive && (
-        <p className="flex items-start gap-1.5 rounded-xl border border-[#FFD21F] bg-[#fff6cc] px-3 py-2 text-xs leading-relaxed text-[#5c4a00]">
-          <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-          Using current reference market value — live market provider not
-          configured. Live market data is not currently connected. The
-          calculator is using the project&apos;s reference market values.
-          Connect a market-data provider to use live prices.
+        <p className="flex items-start gap-1.5 rounded-xl border border-[#FFD21F]/70 bg-[#fff6cc] text-[#5c4a00] dark:bg-[#FFD21F]/15 dark:text-[#FFD21F]/80">
+          <Info className="my-0.5 mx-0.5 size-3.5 shrink-0" aria-hidden="true" />
+          Showing reference prices because live market data isn't connected.
+          Treat figures as estimates.
         </p>
       )}
     </div>
   );
 }
 
-function NumberField({ id, label, value, onChange, hint, min = 0 }) {
+function NumberField({
+  id,
+  label,
+  value,
+  onChange,
+  hint,
+  min = 0,
+  readOnly = false,
+}) {
   return (
     <div className="space-y-1.5">
       <Label htmlFor={id}>{label}</Label>
@@ -145,8 +154,13 @@ function NumberField({ id, label, value, onChange, hint, min = 0 }) {
         step="any"
         placeholder="0"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-11 rounded-xl text-[15px]"
+        onChange={(e) => onChange?.(e.target.value)}
+        readOnly={readOnly}
+        aria-readonly={readOnly || undefined}
+        className={cn(
+          "h-11 rounded-xl text-[15px]",
+          readOnly && "cursor-not-allowed bg-muted font-semibold",
+        )}
       />
       {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
     </div>
@@ -161,20 +175,29 @@ export default function Zakat() {
   const [marketError, setMarketError] = useState("");
   const [result, setResult] = useState(null);
   const idCounter = useRef(2);
+  const resultRef = useRef(null);
   const calc = useCalculateZakat();
+  const marketCall = useCalculateZakat();
 
-  const set = (patch) => setForm((f) => ({ ...f, ...patch }));
-  const setRow = (id, patch) =>
+  const set = (patch) => {
+    setResult(null);
+    setForm((f) => ({ ...f, ...patch }));
+  };
+  const setRow = (id, patch) => {
+    setResult(null);
     setForm((f) => ({
       ...f,
-      foreignRows: f.foreignRows.map((r) => (r.id === id ? { ...r, ...patch } : r)),
+      foreignRows: f.foreignRows.map((r) =>
+        r.id === id ? { ...r, ...patch } : r,
+      ),
     }));
+  };
 
   // Load market/reference prices on mount with a zero-value estimate.
   // Nothing personal is sent; the response marketData feeds the panel below.
   useEffect(() => {
     let cancelled = false;
-    calc.mutate(
+    marketCall.mutate(
       {
         zakatYearType: "hijri",
         yearCompleted: false,
@@ -194,17 +217,25 @@ export default function Zakat() {
         },
         onError: () => {
           if (!cancelled) {
-            setMarketError("Could not load market data. You can still calculate below.");
+            setMarketError(
+              "Could not load market data. You can still calculate below.",
+            );
             setMarketLoading(false);
           }
         },
-      }
+      },
     );
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (result) {
+      resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [result]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -214,8 +245,13 @@ export default function Zakat() {
       const rawAmount = String(row.amount ?? "").trim();
       const label = String(row.label ?? "").trim();
       if (rawAmount === "" && label === "") return; // empty row: skip
-      const amount = parseNonNegative(row.amount, `Foreign asset #${i + 1}`, errors);
-      if (!row.currency) errors.push(`Foreign asset #${i + 1} needs a currency.`);
+      const amount = parseNonNegative(
+        row.amount,
+        `Foreign asset #${i + 1}`,
+        errors,
+      );
+      if (!row.currency)
+        errors.push(`Foreign asset #${i + 1} needs a currency.`);
       foreignAssets.push({ amount, currency: row.currency, label });
     });
 
@@ -223,23 +259,27 @@ export default function Zakat() {
       zakatYearType: form.zakatYearType,
       yearCompleted: form.yearCompleted,
       nisabBasis: form.nisabBasis,
-      cashBdt: parseNonNegative(form.cashBdt, "Cash in BDT", errors),
+      cashBdt: parseNonNegative(form.cashBdt, errors),
       goldGrams: parseNonNegative(form.goldGrams, "Gold", errors),
       silverGrams: parseNonNegative(form.silverGrams, "Silver", errors),
       businessAmount: {
-        amount: parseNonNegative(form.businessAmount, "Business amount", errors),
+        amount: parseNonNegative(
+          form.businessAmount,
+          "Business amount",
+          errors,
+        ),
         currency: form.businessCurrency,
       },
       foreignAssets,
       deductibleLiabilitiesBdt: parseNonNegative(
         form.deductibleLiabilitiesBdt,
         "Deductible liabilities",
-        errors
+        errors,
       ),
       interestAmountToExcludeBdt: parseNonNegative(
         form.interestAmountToExcludeBdt,
         "Interest to exclude",
-        errors
+        errors,
       ),
     };
     setFieldErrors(errors);
@@ -257,7 +297,8 @@ export default function Zakat() {
 
   const calcError =
     calc.isError && !calc.isPending
-      ? calc.error?.response?.data?.message || "Calculation failed. Please try again."
+      ? calc.error?.response?.data?.message ||
+        "Calculation failed. Please try again."
       : "";
   const calcErrorList = calc.error?.response?.data?.errors ?? [];
   const pending = calc.isPending;
@@ -265,13 +306,37 @@ export default function Zakat() {
 
   const breakdownRows = calcData
     ? [
-        { icon: Wallet, label: "Cash (BDT)", value: calcData.breakdown.cashBdt },
-        { icon: Coins, label: "Gold value", value: calcData.breakdown.goldValueBdt },
-        { icon: Coins, label: "Silver value", value: calcData.breakdown.silverValueBdt },
-        { icon: Landmark, label: "Business value", value: calcData.breakdown.businessValueBdt },
-        { icon: Banknote, label: "Foreign assets", value: calcData.breakdown.foreignAssetsBdt },
+        {
+          icon: Wallet,
+          label: "Cash (BDT)",
+          value: calcData.breakdown.cashBdt,
+        },
+        {
+          icon: Coins,
+          label: "Gold value",
+          value: calcData.breakdown.goldValueBdt,
+        },
+        {
+          icon: Coins,
+          label: "Silver value",
+          value: calcData.breakdown.silverValueBdt,
+        },
+        {
+          icon: Landmark,
+          label: "Business value",
+          value: calcData.breakdown.businessValueBdt,
+        },
+        {
+          icon: Banknote,
+          label: "Foreign assets",
+          value: calcData.breakdown.foreignAssetsBdt,
+        },
       ]
     : [];
+
+  const conversions =
+    calcData?.foreignConversions?.filter((c) => c.inputCurrency !== "BDT") ??
+    [];
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6">
@@ -281,17 +346,11 @@ export default function Zakat() {
           <HandCoins className="size-3.5" aria-hidden="true" /> Zakat Calculator
         </p>
         <h1 className="font-heading mt-3 text-2xl font-extrabold sm:text-3xl">
-          Zakat Calculator / যাকাত ক্যালকুলেটর
+          Zakat Calculator
         </h1>
-        <p className="mt-2 max-w-xl text-sm leading-relaxed text-white/85">
-          Enter your assets temporarily to get a deterministic BDT estimate at
-          2.5%. Choose a Hijri or English year, pick a nisab basis, and review
-          the full breakdown.
-        </p>
-        <p className="mt-3 flex items-start gap-1.5 rounded-xl bg-white/10 px-3 py-2 text-xs leading-relaxed text-white/90">
+        <p className="mt-3 inline-flex items-start gap-1.5 rounded-xl bg-white/10 px-3 py-2 text-xs leading-relaxed text-white/90">
           <Lock className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-          Your entered Zakat details are calculated temporarily and are not
-          saved — not in our database, not in your browser.
+          Your entered Zakat details are calculated temporarily and are not saved.
         </p>
       </section>
 
@@ -299,8 +358,9 @@ export default function Zakat() {
         {/* Settings */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-[#064581]">
-              <MoonStar className="size-5" aria-hidden="true" /> Calculation settings
+            <CardTitle className="flex items-center gap-2 text-[#064581] dark:text-primary">
+              <MoonStar className="size-5" aria-hidden="true" /> Calculation
+              settings
             </CardTitle>
             <CardDescription>
               Year type, completion, and nisab basis for this estimate.
@@ -309,10 +369,18 @@ export default function Zakat() {
           <CardContent className="space-y-5">
             <fieldset>
               <legend className="mb-2 text-sm font-medium">Zakat year</legend>
-              <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Zakat year type">
+              <div
+                className="grid grid-cols-2 gap-2"
+                role="radiogroup"
+                aria-label="Zakat year type"
+              >
                 {[
                   { value: "hijri", label: "Hijri year", hint: "Lunar year" },
-                  { value: "gregorian", label: "English year", hint: "Gregorian year" },
+                  {
+                    value: "gregorian",
+                    label: "English year",
+                    hint: "Gregorian year",
+                  },
                 ].map((opt) => (
                   <button
                     key={opt.value}
@@ -323,18 +391,22 @@ export default function Zakat() {
                     className={cn(
                       "rounded-xl border px-3 py-2.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0756A6]",
                       form.zakatYearType === opt.value
-                        ? "border-[#0756A6] bg-[#EAF3FC]"
-                        : "border-input bg-card hover:border-primary/40"
+                        ? "border-primary bg-brand-soft dark:bg-primary/15"
+                        : "border-input bg-card hover:border-primary/40",
                     )}
                   >
-                    <span className="block text-sm font-semibold text-[#17212B]">{opt.label}</span>
-                    <span className="block text-xs text-muted-foreground">{opt.hint}</span>
+                    <span className="block text-sm font-semibold text-foreground">
+                      {opt.label}
+                    </span>
+                    <span className="block text-xs text-muted-foreground">
+                      {opt.hint}
+                    </span>
                   </button>
                 ))}
               </div>
             </fieldset>
 
-            <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-input bg-card px-3 py-2.5 has-checked:border-[#0756A6] has-checked:bg-[#EAF3FC]">
+            <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-input bg-card px-3 py-2.5 has-checked:border-primary has-checked:bg-brand-soft dark:has-checked:bg-primary/15">
               <input
                 type="checkbox"
                 checked={form.yearCompleted}
@@ -342,7 +414,7 @@ export default function Zakat() {
                 className="mt-1 size-4 accent-[#0756A6]"
               />
               <span className="text-sm">
-                <span className="font-semibold text-[#17212B]">
+                <span className="font-semibold text-foreground">
                   I confirm one selected year has completed
                 </span>
                 <span className="block text-xs text-muted-foreground">
@@ -353,9 +425,17 @@ export default function Zakat() {
 
             <fieldset>
               <legend className="mb-2 text-sm font-medium">Nisab basis</legend>
-              <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Nisab basis">
+              <div
+                className="grid grid-cols-2 gap-2"
+                role="radiogroup"
+                aria-label="Nisab basis"
+              >
                 {[
-                  { value: "silver", label: "Silver nisab", hint: "612.36 g silver" },
+                  {
+                    value: "silver",
+                    label: "Silver nisab",
+                    hint: "612.36 g silver",
+                  },
                   { value: "gold", label: "Gold nisab", hint: "87.48 g gold" },
                 ].map((opt) => (
                   <button
@@ -367,21 +447,31 @@ export default function Zakat() {
                     className={cn(
                       "rounded-xl border px-3 py-2.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0756A6]",
                       form.nisabBasis === opt.value
-                        ? "border-[#0756A6] bg-[#EAF3FC]"
-                        : "border-input bg-card hover:border-primary/40"
+                        ? "border-primary bg-brand-soft dark:bg-primary/15"
+                        : "border-input bg-card hover:border-primary/40",
                     )}
                   >
-                    <span className="block text-sm font-semibold text-[#17212B]">{opt.label}</span>
-                    <span className="block text-xs text-muted-foreground">{opt.hint}</span>
+                    <span className="block text-sm font-semibold text-foreground">
+                      {opt.label}
+                    </span>
+                    <span className="block text-xs text-muted-foreground">
+                      {opt.hint}
+                    </span>
                   </button>
                 ))}
               </div>
             </fieldset>
 
             <div className="rounded-2xl border border-input bg-card p-4">
-              <h3 className="text-sm font-semibold text-[#17212B]">Metal prices</h3>
+              <h3 className="text-sm font-semibold text-foreground">
+                Metal prices
+              </h3>
               <div className="mt-2">
-                <MarketPanel market={market} loading={marketLoading} loadError={marketError} />
+                <MarketPanel
+                  market={market}
+                  loading={marketLoading}
+                  loadError={marketError}
+                />
               </div>
             </div>
           </CardContent>
@@ -390,7 +480,7 @@ export default function Zakat() {
         {/* Assets */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-[#064581]">
+            <CardTitle className="flex items-center gap-2 text-[#064581] dark:text-primary">
               <Wallet className="size-5" aria-hidden="true" /> Assets
             </CardTitle>
             <CardDescription>
@@ -436,32 +526,50 @@ export default function Zakat() {
                   className={CONTROL}
                 >
                   {CURRENCIES.map((c) => (
-                    <option key={c} value={c}>{c}</option>
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
                   ))}
                 </select>
               </div>
             </div>
 
-            <div className="space-y-3 rounded-2xl bg-[#F5F7FA] p-4">
+            <div className="space-y-3 rounded-2xl bg-muted p-4">
               <div className="flex items-center justify-between gap-2">
-                <h3 className="flex items-center gap-1.5 text-sm font-semibold text-[#17212B]">
-                  <Banknote className="size-4" aria-hidden="true" /> Foreign assets
+                <h3 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+                  <Banknote className="size-4" aria-hidden="true" /> Foreign
+                  assets
                 </h3>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   onClick={() =>
-                    set({ foreignRows: [...form.foreignRows, { id: idCounter.current++, amount: "", currency: "USD", label: "" }] })
+                    set({
+                      foreignRows: [
+                        ...form.foreignRows,
+                        {
+                          id: idCounter.current++,
+                          amount: "",
+                          currency: "USD",
+                          label: "",
+                        },
+                      ],
+                    })
                   }
                 >
                   <Plus className="size-4" aria-hidden="true" /> Add asset
                 </Button>
               </div>
               {form.foreignRows.map((row, i) => (
-                <div key={row.id} className="grid gap-2 rounded-xl border border-input bg-card p-3 sm:grid-cols-[1fr_130px_auto] sm:items-end">
+                <div
+                  key={row.id}
+                  className="grid gap-2 rounded-xl border border-input bg-card p-3 sm:grid-cols-[1fr_130px_auto] sm:items-end"
+                >
                   <div className="space-y-1.5">
-                    <Label htmlFor={`zakat-fa-amount-${row.id}`}>Amount {i + 1}</Label>
+                    <Label htmlFor={`zakat-fa-amount-${row.id}`}>
+                      Amount {i + 1}
+                    </Label>
                     <Input
                       id={`zakat-fa-amount-${row.id}`}
                       type="number"
@@ -470,7 +578,9 @@ export default function Zakat() {
                       step="any"
                       placeholder="0"
                       value={row.amount}
-                      onChange={(e) => setRow(row.id, { amount: e.target.value })}
+                      onChange={(e) =>
+                        setRow(row.id, { amount: e.target.value })
+                      }
                       className="h-11 rounded-xl text-[15px]"
                     />
                   </div>
@@ -479,24 +589,32 @@ export default function Zakat() {
                     <select
                       id={`zakat-fa-ccy-${row.id}`}
                       value={row.currency}
-                      onChange={(e) => setRow(row.id, { currency: e.target.value })}
+                      onChange={(e) =>
+                        setRow(row.id, { currency: e.target.value })
+                      }
                       className={CONTROL}
                     >
                       {CURRENCIES.filter((c) => c !== "BDT").map((c) => (
-                        <option key={c} value={c}>{c}</option>
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
                       ))}
                     </select>
                   </div>
                   <div className="flex gap-2">
                     <div className="flex-1 space-y-1.5 sm:min-w-32">
-                      <Label htmlFor={`zakat-fa-label-${row.id}`}>Label (optional)</Label>
+                      <Label htmlFor={`zakat-fa-label-${row.id}`}>
+                        Label (optional)
+                      </Label>
                       <Input
                         id={`zakat-fa-label-${row.id}`}
                         type="text"
                         maxLength={80}
                         placeholder="Savings account"
                         value={row.label}
-                        onChange={(e) => setRow(row.id, { label: e.target.value })}
+                        onChange={(e) =>
+                          setRow(row.id, { label: e.target.value })
+                        }
                         className="h-11 rounded-xl text-[15px]"
                       />
                     </div>
@@ -505,7 +623,13 @@ export default function Zakat() {
                       variant="ghost"
                       size="icon"
                       aria-label={`Remove foreign asset ${i + 1}`}
-                      onClick={() => set({ foreignRows: form.foreignRows.filter((r) => r.id !== row.id) })}
+                      onClick={() =>
+                        set({
+                          foreignRows: form.foreignRows.filter(
+                            (r) => r.id !== row.id,
+                          ),
+                        })
+                      }
                       className="mt-6 shrink-0 text-destructive hover:bg-destructive/10"
                     >
                       <Trash2 className="size-4" aria-hidden="true" />
@@ -535,7 +659,7 @@ export default function Zakat() {
                 hint="Subtracted before eligibility"
               />
             </div>
-            <p className="flex items-start gap-1.5 rounded-xl bg-[#EAF3FC] px-3 py-2 text-xs leading-relaxed text-[#064581]">
+            <p className="flex items-start gap-1.5 rounded-xl bg-brand-soft dark:bg-primary/15 px-3 py-2 text-xs leading-relaxed text-[#064581] dark:text-primary">
               <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
               Hishab cannot reliably identify interest from one combined wallet
               balance. Enter the interest portion you want excluded — it is
@@ -583,11 +707,13 @@ export default function Zakat() {
         >
           {pending ? (
             <>
-              <Loader2 className="size-5 animate-spin" aria-hidden="true" /> Calculating…
+              <Loader2 className="size-5 animate-spin" aria-hidden="true" />{" "}
+              Calculating…
             </>
           ) : (
             <>
-              <Calculator className="size-5" aria-hidden="true" /> Calculate Zakat
+              <Calculator className="size-5" aria-hidden="true" /> Calculate
+              Zakat
             </>
           )}
         </Button>
@@ -595,93 +721,141 @@ export default function Zakat() {
 
       {/* Result */}
       {calcData && (
-        <section aria-live="polite" aria-label="Zakat result" className="space-y-6">
+        <section
+          ref={resultRef}
+          aria-live="polite"
+          aria-label="Zakat result"
+          className="scroll-mt-24 space-y-6"
+        >
           <Card className="overflow-hidden">
-            <div className={cn("h-2 w-full", calcData.eligible ? "bg-emerald-500" : "bg-[#FFD21F]")} aria-hidden="true" />
+            <div
+              className={cn(
+                "h-2 w-full",
+                calcData.eligible ? "bg-emerald-500" : "bg-[#FFD21F]",
+              )}
+              aria-hidden="true"
+            />
             <CardHeader>
               <div className="flex flex-wrap items-center gap-2">
                 {calcData.eligible ? (
-                  <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-50">
-                    <ShieldCheck className="size-3.5" aria-hidden="true" /> Zakat due — eligible
+                  <Badge className="border-success/30 bg-success/10 text-success hover:bg-success/10">
+                    <ShieldCheck className="size-3.5" aria-hidden="true" />{" "}
+                    Zakat due — eligible
                   </Badge>
                 ) : (
-                  <Badge className="border-[#FFD21F] bg-[#fff6cc] text-[#5c4a00] hover:bg-[#fff6cc]">
+                  <Badge className="border-[#FFD21F] bg-[#fff6cc] text-[#5c4a00]">
                     Not eligible
                   </Badge>
                 )}
                 <span className="text-xs text-muted-foreground">
-                  {calcData.zakatYearType === "hijri" ? "Hijri year" : "English year"}
+                  {calcData.zakatYearType === "hijri"
+                    ? "Hijri year"
+                    : "English year"}
                   {" · "}
-                  {calcData.nisabBasis === "gold" ? "Gold nisab" : "Silver nisab"}
-                  {" · Rate 2.5%"}
+                  {calcData.nisabBasis === "gold"
+                    ? "Gold nisab"
+                    : "Silver nisab"}
+                  {` · Rate ${calcData.zakatRate * 100}%`}
                 </span>
               </div>
-              <CardTitle className="mt-2 text-[#064581]">Estimated Zakat</CardTitle>
+              <CardTitle className="mt-2 text-[#064581] dark:text-primary">
+                Estimated Zakat
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-5">
-              <p className="font-heading text-4xl font-extrabold text-[#17212B]">
+              <p className="font-heading text-4xl font-extrabold text-foreground">
                 {formatBDT(calcData.zakatAmountBdt)}
               </p>
               {!calcData.yearCompleted && (
-                <p className="rounded-xl bg-[#fff6cc] px-3 py-2 text-xs text-[#5c4a00]">
+                <p className="rounded-xl border-[#FFD21F] bg-[#fff6cc] text-[#5c4a00] dark:bg-[#FFD21F]/15 dark:text-[#FFD21F]">
                   One full year has not completed, so no Zakat is due yet — the
                   estimate above is ৳0 regardless of wealth.
                 </p>
               )}
 
               <div>
-                <h3 className="flex items-center gap-1.5 text-sm font-semibold text-[#17212B]">
-                  <Scale className="size-4" aria-hidden="true" /> Calculation breakdown
+                <h3 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+                  <Scale className="size-4" aria-hidden="true" /> Calculation
+                  breakdown
                 </h3>
                 <dl className="mt-2 divide-y divide-border rounded-xl border border-input">
                   {breakdownRows.map(({ icon: Icon, label, value }) => (
-                    <div key={label} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                    <div
+                      key={label}
+                      className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
+                    >
                       <dt className="flex items-center gap-1.5 text-muted-foreground">
                         <Icon className="size-3.5" aria-hidden="true" /> {label}
                       </dt>
-                      <dd className="font-semibold text-[#17212B]">{formatBDT(value)}</dd>
+                      <dd className="font-semibold text-foreground">
+                        {formatBDT(value)}
+                      </dd>
                     </div>
                   ))}
-                  <div className="flex items-center justify-between gap-3 bg-[#F5F7FA] px-3 py-2 text-sm">
-                    <dt className="text-muted-foreground">Gross zakatable assets</dt>
-                    <dd className="font-semibold text-[#17212B]">{formatBDT(calcData.breakdown.grossZakatableAssetsBdt)}</dd>
+                  <div className="flex items-center justify-between gap-3 bg-muted px-3 py-2 text-sm">
+                    <dt className="text-muted-foreground">
+                      Gross zakatable assets
+                    </dt>
+                    <dd className="font-semibold text-foreground">
+                      {formatBDT(calcData.breakdown.grossZakatableAssetsBdt)}
+                    </dd>
                   </div>
                   <div className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
                     <dt className="text-muted-foreground">Interest excluded</dt>
-                    <dd className="font-semibold text-[#17212B]">−{formatBDT(calcData.breakdown.interestExcludedBdt)}</dd>
+                    <dd className="font-semibold text-foreground">
+                      −{formatBDT(calcData.breakdown.interestExcludedBdt)}
+                    </dd>
                   </div>
                   <div className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                    <dt className="text-muted-foreground">Deductible liabilities</dt>
-                    <dd className="font-semibold text-[#17212B]">−{formatBDT(calcData.breakdown.deductibleLiabilitiesBdt)}</dd>
+                    <dt className="text-muted-foreground">
+                      Deductible liabilities
+                    </dt>
+                    <dd className="font-semibold text-foreground">
+                      −{formatBDT(calcData.breakdown.deductibleLiabilitiesBdt)}
+                    </dd>
                   </div>
-                  <div className="flex items-center justify-between gap-3 bg-[#EAF3FC] px-3 py-2 text-sm">
-                    <dt className="font-semibold text-[#064581]">Net zakatable wealth</dt>
-                    <dd className="font-bold text-[#064581]">{formatBDT(calcData.breakdown.netZakatableWealthBdt)}</dd>
+                  <div className="flex items-center justify-between gap-3 bg-brand-soft dark:bg-primary/15 px-3 py-2 text-sm">
+                    <dt className="font-semibold text-[#064581] dark:text-primary">
+                      Net zakatable wealth
+                    </dt>
+                    <dd className="font-bold text-[#064581] dark:text-primary">
+                      {formatBDT(calcData.breakdown.netZakatableWealthBdt)}
+                    </dd>
                   </div>
                   <div className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                    <dt className="text-muted-foreground">Selected nisab ({calcData.nisabBasis})</dt>
-                    <dd className="font-semibold text-[#17212B]">{formatBDT(calcData.breakdown.selectedNisabBdt)}</dd>
+                    <dt className="text-muted-foreground">
+                      Selected nisab ({calcData.nisabBasis})
+                    </dt>
+                    <dd className="font-semibold text-foreground">
+                      {formatBDT(calcData.breakdown.selectedNisabBdt)}
+                    </dd>
                   </div>
                 </dl>
               </div>
 
-              {calcData.foreignConversions.length > 0 && (
+              {conversions.length > 0 && (
                 <div>
-                  <h3 className="flex items-center gap-1.5 text-sm font-semibold text-[#17212B]">
-                    <Banknote className="size-4" aria-hidden="true" /> Foreign currency conversions
+                  <h3 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+                    <Banknote className="size-4" aria-hidden="true" /> Foreign
+                    currency conversions
                   </h3>
                   <ul className="mt-2 space-y-2">
-                    {calcData.foreignConversions.map((c, i) => (
-                      <li key={`${c.inputCurrency}-${c.inputAmount}-${i}`} className="rounded-xl border border-input px-3 py-2 text-sm">
+                    {conversions.map((c, i) => (
+                      <li
+                        key={`${c.inputCurrency}-${c.inputAmount}-${i}`}
+                        className="rounded-xl border border-input px-3 py-2 text-sm"
+                      >
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="font-semibold text-[#17212B]">
-                            {c.inputAmount} {c.inputCurrency} → {formatBDT(c.convertedBdt)}
+                          <span className="font-semibold text-foreground">
+                            {c.inputAmount} {c.inputCurrency} →{" "}
+                            {formatBDT(c.convertedBdt)}
                           </span>
                           <MarketBadge isLive={c.isLive} />
                         </div>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          Rate 1 {c.inputCurrency} = {c.rateToBdt} BDT · Source {c.source} · {formatDate(c.rateDate)}
-                          {!c.isLive && " · Using reference exchange rate — live FX provider not configured."}
+                          Rate 1 {c.inputCurrency} = {c.rateToBdt} BDT · Source{" "}
+                          {c.source} · {formatDate(c.rateDate)}
+                          {!c.isLive && " · Reference rate, not live."}
                         </p>
                       </li>
                     ))}
@@ -689,15 +863,8 @@ export default function Zakat() {
                 </div>
               )}
 
-              <div className="rounded-2xl border border-input p-4">
-                <h3 className="text-sm font-semibold text-[#17212B]">Market data for this estimate</h3>
-                <div className="mt-2">
-                  <MarketPanel market={calcData.marketData} loading={false} />
-                </div>
-              </div>
-
-              <p className="rounded-xl bg-[#F5F7FA] px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-                Estimate only; consult a qualified scholar. {calcData.disclaimer}
+              <p className="rounded-xl bg-muted px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+                {calcData.disclaimer}
               </p>
             </CardContent>
           </Card>

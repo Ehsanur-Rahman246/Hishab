@@ -115,7 +115,7 @@ function buildEvidence(summaries) {
 
 const Avatar = () => (
   <span className="mt-1 grid size-10 shrink-0 place-items-center rounded-xl bg-[#064581] text-accent">
-    <Sparkles className="size-[18px]" aria-hidden="true" />
+    <Sparkles className="size-4.5" aria-hidden="true" />
   </span>
 );
 
@@ -722,10 +722,10 @@ const AiAssistant = () => {
   const [language, setLanguage] = useState("auto");
 
   return (
-    <div className="mx-auto w-full max-w-[1400px]">
+    <div className="mx-auto w-full max-w-350">
       <section
         aria-label="Finance assistant"
-        className="flex h-[calc(100svh-12rem)] min-h-[620px] flex-col overflow-hidden rounded-2xl bg-card shadow-panel ring-1 ring-foreground/10"
+        className="flex h-[calc(100svh-12rem)] min-h-155 flex-col overflow-hidden rounded-2xl bg-card shadow-panel ring-1 ring-foreground/10"
       >
         <header className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-4 sm:px-8">
           <div className="flex items-center gap-3">

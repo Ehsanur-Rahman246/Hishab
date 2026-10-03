@@ -10,6 +10,8 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
   Settings,
   Sparkles,
   Target,
@@ -56,29 +58,58 @@ const initialsOf = (name = "") =>
     .map((w) => w[0].toUpperCase())
     .join("") || "U";
 
-function SidebarContent({ onNavigate }) {
+function SidebarContent({ onNavigate, collapsed = false, onToggle }) {
   return (
     <div className="flex h-full flex-col bg-[#064581] text-white">
-      <div className="px-6 pt-6 pb-8">
+      <div
+        className={cn(
+          "flex pt-6 pb-8",
+          collapsed
+            ? "flex-col items-center gap-4 px-3"
+            : "items-center justify-between px-6",
+        )}
+      >
         <Link
           to="/dashboard"
           onClick={onNavigate}
           aria-label="Hishab dashboard"
-          className="grid size-11 place-items-center rounded-xl bg-[#ffd21f] font-heading text-xl font-extrabold text-[#064581]"
+          className="grid size-11 shrink-0 place-items-center rounded-xl bg-[#ffd21f] font-heading text-xl font-extrabold text-[#064581]"
         >
           H
         </Link>
+
+        {/* only the desktop sidebar passes onToggle */}
+        {onToggle ? (
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-expanded={!collapsed}
+            className="grid size-9 place-items-center rounded-lg text-white/80 hover:bg-white/10 hover:text-white"
+          >
+            {collapsed ? (
+              <PanelLeftOpen className="size-5" aria-hidden="true" />
+            ) : (
+              <PanelLeftClose className="size-5" aria-hidden="true" />
+            )}
+          </button>
+        ) : null}
       </div>
 
-      <nav aria-label="Main" className="flex-1 space-y-1.5 px-3">
+      <nav
+        aria-label="Main"
+        className="flex-1 space-y-1.5 overflow-y-auto px-3"
+      >
         {NAV.map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}
             onClick={onNavigate}
+            title={collapsed ? label : undefined}
             className={({ isActive }) =>
               cn(
-                "relative flex h-12 items-center gap-4 rounded-xl px-4 text-[15px] font-medium transition-colors",
+                "relative flex h-12 items-center rounded-xl text-[15px] font-medium transition-colors",
+                collapsed ? "justify-center" : "gap-4 px-4",
                 isActive
                   ? "bg-white font-semibold text-[#064581] before:absolute before:top-1/2 before:-left-3 before:h-8 before:w-1 before:-translate-y-1/2 before:rounded-r before:bg-[#ffd21f]"
                   : "text-white/90 hover:bg-white/10",
@@ -86,20 +117,25 @@ function SidebarContent({ onNavigate }) {
             }
           >
             <Icon className="size-5 shrink-0" aria-hidden="true" />
-            <span className="flex-1">{label}</span>
+            <span className={collapsed ? "sr-only" : "flex-1"}>{label}</span>
           </NavLink>
         ))}
       </nav>
 
-      <div className="m-3 rounded-xl bg-white/10 p-4">
-        <p className="flex items-center gap-2 text-sm font-semibold">
-          <span className="size-2 rounded-full bg-[#ffd21f]" aria-hidden="true" />
-          Bank-level security
-        </p>
-        <p className="mt-1 text-sm leading-snug text-white/80">
-          Read-only access. Your data is encrypted.
-        </p>
-      </div>
+      {!collapsed ? (
+        <div className="m-3 rounded-xl bg-white/10 p-4">
+          <p className="flex items-center gap-2 text-sm font-semibold">
+            <span
+              className="size-2 rounded-full bg-[#ffd21f]"
+              aria-hidden="true"
+            />
+            Bank-level security
+          </p>
+          <p className="mt-1 text-sm leading-snug text-white/80">
+            Read-only access. Your data is encrypted.
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -138,10 +174,17 @@ function UserMenu({ name, onLogout, loggingOut }) {
           {initialsOf(name)}
         </span>
         <span className="hidden text-left leading-tight sm:block">
-          <span className="block text-sm font-semibold text-[#064581]">{name}</span>
-          <span className="block text-xs text-muted-foreground">Personal plan</span>
+          <span className="block text-sm font-semibold text-[#064581]">
+            {name}
+          </span>
+          <span className="block text-xs text-muted-foreground">
+            Personal plan
+          </span>
         </span>
-        <ChevronDown className="hidden size-4 text-muted-foreground sm:block" aria-hidden="true" />
+        <ChevronDown
+          className="hidden size-4 text-muted-foreground sm:block"
+          aria-hidden="true"
+        />
       </button>
 
       {open ? (
@@ -149,10 +192,20 @@ function UserMenu({ name, onLogout, loggingOut }) {
           role="menu"
           className="absolute right-0 z-50 mt-2 w-48 rounded-xl bg-popover p-1.5 shadow-panel ring-1 ring-foreground/10"
         >
-          <Link role="menuitem" to="/profile" onClick={() => setOpen(false)} className={itemClass}>
+          <Link
+            role="menuitem"
+            to="/profile"
+            onClick={() => setOpen(false)}
+            className={itemClass}
+          >
             <User className="size-4" aria-hidden="true" /> Profile
           </Link>
-          <Link role="menuitem" to="/settings" onClick={() => setOpen(false)} className={itemClass}>
+          <Link
+            role="menuitem"
+            to="/settings"
+            onClick={() => setOpen(false)}
+            className={itemClass}
+          >
             <Settings className="size-4" aria-hidden="true" /> Settings
           </Link>
           <button
@@ -177,6 +230,22 @@ export default function AppLayout() {
   const { data: user } = useCurrentUser();
   const { data: alertData } = useAlerts();
   const [drawer, setDrawer] = useState(false);
+
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem("hishab:sidebar-collapsed") === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("hishab:sidebar-collapsed", collapsed ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }, [collapsed]);
 
   const unread = alertData?.alerts?.filter((a) => !a.read).length ?? 0;
   const name = user?.name || "there";
@@ -212,13 +281,26 @@ export default function AppLayout() {
   return (
     <div className="flex min-h-svh bg-background">
       {/* desktop sidebar */}
-      <aside className="sticky top-0 hidden h-svh w-64 shrink-0 md:block xl:w-72">
-        <SidebarContent />
+      <aside
+        className={cn(
+          "sticky top-0 hidden h-svh shrink-0 overflow-hidden transition-[width] duration-200 motion-reduce:transition-none md:block",
+          collapsed ? "w-19" : "w-64 xl:w-72",
+        )}
+      >
+        <SidebarContent
+          collapsed={collapsed}
+          onToggle={() => setCollapsed((c) => !c)}
+        />
       </aside>
 
-{/* mobile drawer */}
+      {/* mobile drawer */}
       {drawer ? (
-        <div className="fixed inset-0 z-50 md:hidden" role="dialog" aria-modal="true" aria-label="Navigation">
+        <div
+          className="fixed inset-0 z-50 md:hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Navigation"
+        >
           <button
             type="button"
             aria-label="Close navigation"
@@ -256,14 +338,18 @@ export default function AppLayout() {
                   <h1 className="truncate text-2xl font-bold text-[#064581]">
                     {greetingFor(new Date().getHours())}, {firstName}
                   </h1>
-                  <p className="truncate text-sm text-muted-foreground">{today}</p>
+                  <p className="truncate text-sm text-muted-foreground">
+                    {today}
+                  </p>
                 </>
               ) : (
                 <>
                   <h1 className="truncate text-2xl font-bold text-[#064581]">
                     {PAGE_TITLES[pathname] ?? "Hishab"}
                   </h1>
-                  <p className="truncate text-sm text-muted-foreground">{today}</p>
+                  <p className="truncate text-sm text-muted-foreground">
+                    {today}
+                  </p>
                 </>
               )}
             </div>
@@ -274,22 +360,34 @@ export default function AppLayout() {
               to="/ai-assistant"
               className="hidden items-center gap-2 rounded-full border border-[#ffd21f]/70 bg-[#fff6cc] px-4 py-2 text-sm font-semibold text-[#064581] hover:bg-[#fff0b0] lg:inline-flex"
             >
-              <span className="size-2 rounded-full bg-[#0755a4]" aria-hidden="true" />
+              <span
+                className="size-2 rounded-full bg-[#0755a4]"
+                aria-hidden="true"
+              />
               AI Insights
             </Link>
 
             <Link
               to="/notifications"
-              aria-label={unread > 0 ? `Notifications, ${unread} unread` : "Notifications"}
+              aria-label={
+                unread > 0 ? `Notifications, ${unread} unread` : "Notifications"
+              }
               className="relative grid size-11 place-items-center rounded-xl border bg-card text-[#064581] hover:bg-muted"
             >
               <Bell className="size-5" aria-hidden="true" />
               {unread > 0 ? (
-                <span className="absolute top-2 right-2.5 size-2.5 rounded-full bg-[#ffd21f] ring-2 ring-card" aria-hidden="true" />
+                <span
+                  className="absolute top-2 right-2.5 size-2.5 rounded-full bg-[#ffd21f] ring-2 ring-card"
+                  aria-hidden="true"
+                />
               ) : null}
             </Link>
 
-            <UserMenu name={name} onLogout={handleLogout} loggingOut={logout.isPending} />
+            <UserMenu
+              name={name}
+              onLogout={handleLogout}
+              loggingOut={logout.isPending}
+            />
           </div>
         </header>
 
