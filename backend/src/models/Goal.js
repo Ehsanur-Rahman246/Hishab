@@ -81,13 +81,47 @@ const goalSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["active", "completed", "paused", "cancelled"],
+      enum: ["active", "completed", "paused", "cancelled", "released"],
       default: "active",
     },
 
     completedAt: {
       type: Date,
       default: null,
+    },
+
+    releasedAt: {
+      type: Date,
+      default: null,
+    },
+
+    releasedAmount: {
+      type: Number,
+      default: null,
+      min: 0,
+    },
+
+    automation: {
+      enabled: { type: Boolean, default: false },
+      frequency: {
+        type: String,
+        enum: ["weekly", "monthly"],
+        default: "monthly",
+      },
+      percentage: {
+        type: Number,
+        default: null,
+        min: 1,
+        max: 100,
+      },
+      priority: {
+        type: Number,
+        default: null,
+        min: 1,
+      },
+      paused: { type: Boolean, default: false },
+      lastProcessedCycle: { type: String, default: null },
+      enabledAt: { type: Date, default: null },
     },
   },
   {

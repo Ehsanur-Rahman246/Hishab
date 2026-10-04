@@ -81,19 +81,6 @@ export const calculateZakatEstimate = async (req, res) => {
         });
       }
 
-      const grossPreview =
-        v.cashBdt +
-        v.goldGrams * marketData.goldBdtPerGram +
-        v.silverGrams * marketData.silverBdtPerGram +
-        businessValueBdt +
-        foreignAssetsBdt;
-      if (v.interestAmountToExcludeBdt > grossPreview) {
-        return res.status(400).json({
-          success: false,
-          message: "Interest to exclude cannot exceed total assets.",
-        });
-      }
-
       const result = calculateZakat(
         {
           zakatYearType: v.zakatYearType,
@@ -104,8 +91,8 @@ export const calculateZakatEstimate = async (req, res) => {
           silverGrams: v.silverGrams,
           businessBdt: businessValueBdt,
           foreignAssetsBdt,
+          pensionBdt: v.pensionBdt,
           deductibleLiabilitiesBdt: v.deductibleLiabilitiesBdt,
-          interestAmountToExcludeBdt: v.interestAmountToExcludeBdt,
         },
         {
           goldBdtPerGram: marketData.goldBdtPerGram,
@@ -136,8 +123,8 @@ export const calculateZakatEstimate = async (req, res) => {
             silverValueBdt: result.silverValueBdt,
             businessValueBdt: result.businessValueBdt,
             foreignAssetsBdt: result.foreignAssetsBdt,
+            pensionBdt: result.pensionBdt,
             grossZakatableAssetsBdt: result.grossZakatableAssetsBdt,
-            interestExcludedBdt: result.interestExcludedBdt,
             deductibleLiabilitiesBdt: result.deductibleLiabilitiesBdt,
             netZakatableWealthBdt: result.netZakatableWealthBdt,
             selectedNisabBdt: result.selectedNisabBdt,

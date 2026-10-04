@@ -31,7 +31,9 @@ import {
 import { useAskCoach } from "@/hooks/useAiCoach";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { useDeleteAllMessages, useMessages } from "@/hooks/useChat";
+import { confirmGoalAddMoney, confirmGoalDelete } from "@/api/aiGoalApi";
 import { useSummaries } from "@/hooks/useSummaries";
+import { useQueryClient } from "@tanstack/react-query";
 import { CATEGORIES, monthKey, recentMonths } from "@/lib/dashboard";
 import { formatBDTWhole, formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -42,6 +44,13 @@ import { cn } from "@/lib/utils";
 // ---------------------------------------------------------------------------
 
 const MAX_MESSAGE = 500;
+// One idempotency key per send: network retries reuse it so the backend
+// returns the original transfer instead of moving money twice.
+// Module scope keeps the react compiler purity rule happy.
+const newIdempotencyKey = () =>
+  typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const LANGUAGES = [
   { id: "auto", label: "Auto" },
   { id: "bn", label: "\u09AC\u09BE\u0982\u09B2\u09BE" },
@@ -157,7 +166,7 @@ function Evidence({ evidence }) {
   );
 }
 
-function Analysis({ text, coach, tags }) {
+function Analysis({ text, coach, tags, goalAction, onConfirmDelete, confirming, addMoneyAction, onConfirmAddMoney }) {
   return (
     <div className="rounded-2xl bg-secondary/80 p-5 ring-1 ring-primary/10">
       <span className="inline-flex items-center gap-1 rounded-full bg-accent px-2.5 py-0.5 text-[11px] font-bold tracking-wide text-accent-foreground uppercase">
@@ -207,6 +216,68 @@ function Analysis({ text, coach, tags }) {
       {coach?.disclaimer ? (
         <p className="mt-3 text-xs text-muted-foreground">{coach.disclaimer}</p>
       ) : null}
+      {goalAction?.kind === "confirm_required" && goalAction?.goal ? (
+        <div className="mt-4 rounded-xl border border-destructive/30 bg-card p-4">
+          <p className="text-sm font-semibold">
+            Delete “{goalAction.goal.title}”? {formatBDTWhole(goalAction.goal.savedAmount)} will be returned to your wallet.
+          </p>
+          <div className="mt-3 flex gap-2">
+            <Button
+              variant="destructive"
+              className="h-10 rounded-xl px-4"
+              disabled={confirming}
+              onClick={() => onConfirmDelete?.(goalAction.goal._id)}
+            >
+              {confirming ? "Deleting…" : `Yes, delete ${goalAction.goal.title}`}
+            </Button>
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Or reply “Yes, delete {goalAction.goal.title}” in chat. Nothing is deleted until you confirm.
+          </p>
+        </div>
+      ) : null}
+      {goalAction?.kind === "ambiguous" && goalAction?.matches?.length ? (
+        <div className="mt-4 rounded-xl border bg-card p-4">
+          <p className="text-sm font-semibold">Multiple goals match — choose one:</p>
+          <ul className="mt-2 space-y-1 text-sm">
+            {goalAction.matches.map((g) => (
+              <li key={g._id} className="flex items-center justify-between gap-2">
+                <span>“{g.title}” — {formatBDTWhole(g.savedAmount)} saved</span>
+                <button
+                  type="button"
+                  disabled={confirming}
+                  onClick={() => onConfirmDelete?.(g._id)}
+                  className="rounded-lg border px-2.5 py-1 text-xs font-semibold hover:bg-secondary disabled:opacity-50"
+                >
+                  Delete
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {addMoneyAction?.kind === "ambiguous" && addMoneyAction?.matches?.length ? (
+        <div className="mt-4 rounded-xl border bg-card p-4">
+          <p className="text-sm font-semibold">
+            Multiple goals match — choose one to add{addMoneyAction.amount ? ` ${formatBDTWhole(addMoneyAction.amount)}` : ""}:
+          </p>
+          <ul className="mt-2 space-y-1 text-sm">
+            {addMoneyAction.matches.map((g) => (
+              <li key={g._id} className="flex items-center justify-between gap-2">
+                <span>“{g.title}” — {formatBDTWhole(g.savedAmount)} saved</span>
+                <button
+                  type="button"
+                  disabled={confirming}
+                  onClick={() => onConfirmAddMoney?.(g._id)}
+                  className="rounded-lg border px-2.5 py-1 text-xs font-semibold hover:bg-secondary disabled:opacity-50"
+                >
+                  Add here
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -215,15 +286,32 @@ function ChatView({ language }) {
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(null); // question awaiting an answer
   const [rich, setRich] = useState({}); // answer text -> full coach reply (this session)
+  const [goalActions, setGoalActions] = useState({}); // answer text -> goalAction payload
+  const [addMoneyActions, setAddMoneyActions] = useState({}); // answer text -> addMoneyAction payload
   const [local, setLocal] = useState([]); // exchanges the backend did not save
   const [error, setError] = useState(null);
+  const [confirmingId, setConfirmingId] = useState(null);
   const logRef = useRef(null);
+  const qc = useQueryClient();
 
   const { data: user } = useCurrentUser();
   const summaries = useSummaries("monthly");
   const msgs = useMessages(); // GET /api/chat (ChatMessage model)
   const ask = useAskCoach(); // POST /api/ai/coach
   const clear = useDeleteAllMessages();
+
+  const refreshAfterGoalDelete = () => {
+    qc.invalidateQueries({ queryKey: ["goals"] });
+    qc.invalidateQueries({ queryKey: ["wallet"] });
+    qc.invalidateQueries({ queryKey: ["transactions"] });
+    qc.invalidateQueries({ queryKey: ["alerts"] });
+    qc.invalidateQueries({ queryKey: ["summaries"] });
+    qc.invalidateQueries({ queryKey: ["chat"] });
+  };
+
+  // Same caches move on Wallet -> Goal contributions, so one refresher covers
+  // both delete-refunds and chat add-money.
+  const refreshAfterGoalMoneyMove = refreshAfterGoalDelete;
 
   const evidence = useMemo(
     () => buildEvidence(summaries.data?.summaries ?? []),
@@ -236,6 +324,8 @@ function ChatView({ language }) {
       role: m.role,
       text: m.text,
       coach: rich[m.text],
+      goalAction: goalActions[m.text],
+      addMoneyAction: addMoneyActions[m.text],
     }));
     const extra = local.flatMap((l) => [
       { id: `${l.id}-q`, role: "user", text: l.user },
@@ -244,10 +334,12 @@ function ChatView({ language }) {
         role: "assistant",
         text: l.coach.answer,
         coach: l.coach,
+        goalAction: l.goalAction,
+        addMoneyAction: l.addMoneyAction,
       },
     ]);
     return [...saved, ...extra];
-  }, [msgs.data, rich, local]);
+  }, [msgs.data, rich, goalActions, addMoneyActions, local]);
 
   useEffect(() => {
     const el = logRef.current;
@@ -267,16 +359,23 @@ function ChatView({ language }) {
     setError(null);
     setPending(message);
     setInput("");
+    // One idempotency key per send: network retries reuse it so the backend
+    // returns the original transfer instead of moving money twice.
+    const idempotencyKey = newIdempotencyKey();
     try {
-      const { coach } = await ask.mutateAsync({ message, language });
+      const { coach, goalAction, addMoneyAction } = await ask.mutateAsync({ message, language, idempotencyKey });
       const fresh = await msgs.refetch();
       const last = (fresh.data?.messages ?? []).at(-1);
       setRich((r) => ({ ...r, [coach.answer]: coach }));
+      if (goalAction) setGoalActions((g) => ({ ...g, [coach.answer]: goalAction }));
+      if (addMoneyAction) setAddMoneyActions((a) => ({ ...a, [coach.answer]: addMoneyAction }));
+      if (goalAction?.kind === "deleted" || goalAction?.kind === "duplicate") refreshAfterGoalDelete();
+      if (addMoneyAction?.added) refreshAfterGoalMoneyMove();
       // the no-data reply is never saved by the backend, so keep it locally
       if (!(last?.role === "assistant" && last.text === coach.answer)) {
         setLocal((l) => [
           ...l,
-          { id: `l-${Date.now()}`, user: message, coach },
+          { id: `l-${Date.now()}`, user: message, coach, goalAction, addMoneyAction },
         ]);
       }
     } catch (err) {
@@ -287,14 +386,100 @@ function ChatView({ language }) {
     }
   };
 
+  const confirmDeleteFromChat = async (goalId) => {
+    if (!goalId || confirmingId) return;
+    setConfirmingId(goalId);
+    setError(null);
+    try {
+      const res = await confirmGoalDelete(goalId, language);
+      await msgs.refetch();
+      if (res?.reply) {
+        setRich((r) => ({
+          ...r,
+          [res.reply]: {
+            language: language === "bn" ? "bn" : language === "en" ? "en" : "mixed",
+            headline: res.goalTitle ? `Goal deleted: ${res.goalTitle}` : "Goal deleted",
+            answer: res.reply,
+            actions: [],
+            tone: "neutral",
+            disclaimer: "",
+          },
+        }));
+        setLocal((l) => [
+          ...l,
+          {
+            id: `l-${Date.now()}`,
+            user: `Yes, delete goal`,
+            coach: { answer: res.reply },
+            goalAction: { kind: "deleted" },
+          },
+        ]);
+      }
+      refreshAfterGoalDelete();
+    } catch (err) {
+      setError(toApiError(err, "Could not delete the goal. No money was moved."));
+    } finally {
+      setConfirmingId(null);
+    }
+  };
+
   const clearChat = () => {
     if (!window.confirm("Delete your whole chat history?")) return;
     clear.mutate(undefined, {
       onSuccess: () => {
         setRich({});
+        setGoalActions({});
+        setAddMoneyActions({});
         setLocal([]);
       },
     });
+  };
+
+  // Explicit choice for an ambiguous add-money command. Amount + condition
+  // come from the server-parsed action payload; the backend re-validates
+  // everything before moving money.
+  const confirmAddMoneyFromChat = (answerText) => async (goalId) => {
+    const action = addMoneyActions[answerText];
+    if (!goalId || confirmingId || !action?.amount) return;
+    setConfirmingId(goalId);
+    setError(null);
+    try {
+      const res = await confirmGoalAddMoney({
+        goalId,
+        amount: action.amount,
+        conditionThreshold: action.conditionThreshold,
+        idempotencyKey: newIdempotencyKey(),
+        language,
+      });
+      await msgs.refetch();
+      if (res?.reply) {
+        setRich((r) => ({
+          ...r,
+          [res.reply]: {
+            language: language === "bn" ? "bn" : language === "en" ? "en" : "mixed",
+            headline: res.goalTitle ? `Added to ${res.goalTitle}` : "Goal updated",
+            answer: res.reply,
+            actions: [],
+            tone: "neutral",
+            disclaimer: "",
+          },
+        }));
+        setLocal((l) => [
+          ...l,
+          {
+            id: `l-${Date.now()}`,
+            user: `Add to goal`,
+            coach: { answer: res.reply },
+            addMoneyAction: { kind: res.duplicate ? "duplicate" : "added" },
+          },
+        ]);
+      }
+      refreshAfterGoalMoneyMove();
+    } catch (err) {
+      setError(toApiError(err, "Could not add money. No money was moved."));
+    } finally {
+      setConfirmingId(null);
+    }
   };
 
   const first = (user?.name || "there").split(" ")[0];
@@ -378,7 +563,7 @@ function ChatView({ language }) {
                     </span>
                   </p>
                 ) : null}
-                <Analysis text={m.text} coach={m.coach} />
+                <Analysis text={m.text} coach={m.coach} goalAction={m.goalAction} onConfirmDelete={confirmDeleteFromChat} confirming={Boolean(confirmingId)} addMoneyAction={m.addMoneyAction} onConfirmAddMoney={m.role === "assistant" ? confirmAddMoneyFromChat(m.text) : undefined} />
               </div>
             </div>
           ),

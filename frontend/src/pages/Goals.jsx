@@ -5,14 +5,19 @@ import {
   CheckCircle2,
   CircleAlert,
   Flag,
+  History,
+  Info,
   Loader2,
   MoreHorizontal,
   Pause,
   Pencil,
   Play,
   Plus,
+  RefreshCw,
   Target,
   Trash2,
+  Undo2,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,17 +42,22 @@ import {
   useCreateGoal,
   useDeleteGoal,
   useGoals,
+  useGoalTransfers,
+  useRunAutomationNow,
   useUpdateGoal,
+  useUpdateGoalAutomation,
   useUpdateGoalStatus,
 } from "@/hooks/useGoals";
-import { formatBDT, formatBDTWhole, formatDate } from "@/lib/format";
+import { formatBDT, formatBDTWhole, formatDate, formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
 // Constants (these mirror the backend: models/Goal.js + goalControllers.js)
 //   goal = { _id, title, description, targetAmount, savedAmount, targetDate,
-//            plans[], selectedPlan, status, completedAt }
-//   status: active | paused | completed | cancelled
+//            plans[], selectedPlan, status, completedAt, releasedAt,
+//            releasedAmount, automation: { enabled, frequency, percentage,
+//            priority, paused, lastProcessedCycle, enabledAt } }
+//   status: active | paused | completed | cancelled | released
 // ---------------------------------------------------------------------------
 
 const TAKA = "\u09F3";
@@ -63,7 +73,67 @@ const TABS = [
   { value: "active", label: "Active" },
   { value: "paused", label: "Paused" },
   { value: "completed", label: "Completed" },
+  { value: "released", label: "Released" },
 ];
+
+const AUTO_CONSENT =
+  "When enabled, Hishab automatically moves the selected percentage of your available Wallet balance into this Goal at the end of each chosen cycle. You can pause or disable it anytime.";
+
+const PRIORITY_HINT =
+  "Priority 1 is funded first. Lower-priority goals may be skipped when Wallet funds are insufficient.";
+
+// Fixed auto-save choices (mirror backend ALLOWED_AUTOMATION_PERCENTAGES).
+// Users pick one; arbitrary values are never accepted for new/changed
+// automations. Legacy goals with other percentages keep working untouched.
+const AUTO_PERCENTAGES = [5, 10, 15, 20, 25];
+const PERCENTAGE_EXPLAINER =
+  "At the end of each selected cycle, Hishab will try to save this percentage of your Wallet balance for this Goal.";
+const PERCENTAGE_CHOICES_ERROR = "Choose one of 5%, 10%, 15%, 20%, or 25%.";
+
+const isLegacyPercentage = (v) =>
+  v !== null && v !== undefined && v !== "" && !AUTO_PERCENTAGES.includes(Number(v));
+
+function PercentageOptions({ value, onChange, idPrefix, legacy }) {
+  return (
+    <div className="grid gap-1.5">
+      <span id={`${idPrefix}-label`} className="text-sm font-medium">
+        Percentage
+      </span>
+      <div
+        className="grid grid-cols-5 gap-2"
+        role="radiogroup"
+        aria-labelledby={`${idPrefix}-label`}
+      >
+        {AUTO_PERCENTAGES.map((p) => {
+          const selected = Number(value) === p;
+          return (
+            <button
+              key={p}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              onClick={() => onChange(String(p))}
+              className={cn(
+                "h-11 rounded-xl border text-[15px] font-bold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0756A6]",
+                selected
+                  ? "border-[#064581] bg-brand-soft text-[#064581] dark:border-primary dark:bg-primary/15 dark:text-primary"
+                  : "border-input bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground",
+              )}
+            >
+              {p}%
+            </button>
+          );
+        })}
+      </div>
+      {legacy != null ? (
+        <p className="rounded-lg bg-[#FFD21F]/25 px-3 py-2 text-xs font-medium text-[#6b4f00] dark:text-[#FFD21F]">
+          Currently {legacy}% (older setting, still honored). Choose an option above to change it.
+        </p>
+      ) : null}
+      <p className="text-xs text-muted-foreground">{PERCENTAGE_EXPLAINER}</p>
+    </div>
+  );
+}
 
 // Same look as the controls on the Transactions page
 const CONTROL =
@@ -126,6 +196,33 @@ function timeLeftLabel(days) {
   return `~${Math.round(days / 30.4)} months left`;
 }
 
+// Dhaka (UTC+6, no DST) wall-clock helpers for cycle labels.
+const dhakaWall = (now = new Date()) => new Date(now.getTime() + 6 * 60 * 60 * 1000);
+const dhakaMonthlyKey = (now = new Date()) => {
+  const w = dhakaWall(now);
+  return `${w.getUTCFullYear()}-${String(w.getUTCMonth() + 1).padStart(2, "0")}`;
+};
+const dhakaWeeklyKey = (now = new Date()) => {
+  const w = dhakaWall(now);
+  const d = new Date(Date.UTC(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate()));
+  const day = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - day);
+  const isoYear = d.getUTCFullYear();
+  const week = Math.ceil(((d - new Date(Date.UTC(isoYear, 0, 1))) / 86400000 + 1) / 7);
+  return `${isoYear}-W${String(week).padStart(2, "0")}`;
+};
+
+const autoOf = (goal) => goal.automation || { enabled: false };
+
+function nextCycleText(goal) {
+  const a = autoOf(goal);
+  if (goal.status === "released") return "Released — no further transfers";
+  if (!a.enabled) return "Automation off";
+  if (a.paused || goal.status !== "active") return "Automation paused";
+  const key = a.frequency === "weekly" ? dhakaWeeklyKey() : dhakaMonthlyKey();
+  return a.frequency === "weekly" ? `Weekly · current cycle ${key}` : `Monthly · current cycle ${key}`;
+}
+
 // The page only ever shows data the backend really has; a plan's estimate is
 // used when one is selected, otherwise the goal's own target date.
 function estimateOf(goal) {
@@ -137,6 +234,8 @@ function estimateOf(goal) {
 
 // Small badge in the card's top-right corner.
 function badgeOf(goal, pct) {
+  if (goal.status === "released")
+    return { text: "Released", icon: Undo2, tone: "bg-[#eaf3fc] text-[#064581] dark:bg-primary/15 dark:text-primary" };
   if (goal.status === "completed")
     return { text: "Completed", icon: CheckCircle2, tone: "bg-success/12 text-success" };
   if (goal.status === "paused")
@@ -179,16 +278,57 @@ function ProgressBar({ pct, done, muted, label }) {
   );
 }
 
-function GoalCard({ goal, busy, onAdd, onEdit, onDelete, onStatus }) {
+function AutomationLine({ goal }) {
+  const a = autoOf(goal);
+  if (goal.status === "released") {
+    return (
+      <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Undo2 className="size-3.5" aria-hidden="true" />
+        Released{goal.releasedAmount != null ? ` · ${money(goal.releasedAmount)} returned` : ""}
+        {goal.releasedAt ? ` · ${formatDate(goal.releasedAt)}` : ""}
+      </p>
+    );
+  }
+  if (!a.enabled) return null;
+  const paused = a.paused || goal.status !== "active";
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+      <span
+        className={cn(
+          "inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold",
+          paused
+            ? "bg-muted text-muted-foreground"
+            : "bg-[#eaf3fc] text-[#064581] dark:bg-primary/15 dark:text-primary",
+        )}
+      >
+        <Zap className="size-3" aria-hidden="true" />
+        {paused ? "Auto-save paused" : "Auto-save on"}
+      </span>
+      <span className="text-muted-foreground tabular-nums">
+        {a.frequency === "weekly" ? "Weekly" : "Monthly"} · {a.percentage}% · Priority {a.priority}
+      </span>
+      <span className="text-muted-foreground">{nextCycleText(goal)}</span>
+    </div>
+  );
+}
+
+function GoalCard({
+  goal, busy, autoBusy, onAdd, onEdit, onDelete, onStatus,
+  onAutomation, onPauseAutomation, onResumeAutomation, onHistory, onRunNow, runPending,
+}) {
   const pct = percentOf(goal);
   const badge = badgeOf(goal, pct);
   const est = estimateOf(goal);
   const completed = goal.status === "completed";
+  const released = goal.status === "released";
   const paused = goal.status === "paused";
   const cancelled = goal.status === "cancelled";
-  const inactive = paused || cancelled;
+  const inactive = paused || cancelled || released;
+  const terminal = completed || cancelled || released;
   const remaining = remainingOf(goal);
-  const StatusIcon = completed ? CheckCircle2 : Target;
+  const StatusIcon = completed ? CheckCircle2 : released ? Undo2 : Target;
+  const a = autoOf(goal);
+  const autoPaused = a.enabled && (a.paused || goal.status !== "active");
 
   return (
     <article
@@ -230,11 +370,13 @@ function GoalCard({ goal, busy, onAdd, onEdit, onDelete, onStatus }) {
             >
               <MoreHorizontal className="size-4" aria-hidden="true" />
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-44">
-              <DropdownMenuItem onClick={() => onEdit(goal)}>
-                <Pencil aria-hidden="true" /> Edit goal
-              </DropdownMenuItem>
-              {goal.status === "active" ? (
+            <DropdownMenuContent align="end" className="w-52">
+              {!terminal ? (
+                <DropdownMenuItem onClick={() => onEdit(goal)}>
+                  <Pencil aria-hidden="true" /> Edit goal
+                </DropdownMenuItem>
+              ) : null}
+              {goal.status === "active" && !released ? (
                 <DropdownMenuItem onClick={() => onStatus(goal, "paused")}>
                   <Pause aria-hidden="true" /> Pause goal
                 </DropdownMenuItem>
@@ -244,6 +386,25 @@ function GoalCard({ goal, busy, onAdd, onEdit, onDelete, onStatus }) {
                   <Play aria-hidden="true" /> {paused ? "Resume goal" : "Reactivate goal"}
                 </DropdownMenuItem>
               ) : null}
+              {!terminal ? (
+                <DropdownMenuItem onClick={() => onAutomation(goal)}>
+                  <Zap aria-hidden="true" />
+                  {a.enabled ? "Edit auto-save" : "Set up auto-save"}
+                </DropdownMenuItem>
+              ) : null}
+              {a.enabled && !autoPaused && !terminal ? (
+                <DropdownMenuItem onClick={() => onPauseAutomation(goal)}>
+                  <Pause aria-hidden="true" /> Pause auto-save
+                </DropdownMenuItem>
+              ) : null}
+              {a.enabled && autoPaused && goal.status === "active" ? (
+                <DropdownMenuItem onClick={() => onResumeAutomation(goal)}>
+                  <Play aria-hidden="true" /> Resume auto-save
+                </DropdownMenuItem>
+              ) : null}
+              <DropdownMenuItem onClick={() => onHistory(goal)}>
+                <History aria-hidden="true" /> Transfer history
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem variant="destructive" onClick={() => onDelete(goal)}>
                 <Trash2 aria-hidden="true" /> Delete goal
@@ -287,18 +448,31 @@ function GoalCard({ goal, busy, onAdd, onEdit, onDelete, onStatus }) {
           </span>
         </div>
         <p className="mt-1.5 min-h-5 text-xs text-muted-foreground">
-          {completed
-            ? goal.completedAt
-              ? `Reached on ${formatDate(goal.completedAt)}`
-              : "Fully funded"
-            : cancelled
-              ? "This goal was cancelled"
-              : `${money(remaining)} to go \u00B7 ${paused ? "paused" : timeLeftLabel(daysLeftOf(goal))}`}
+          {released
+            ? goal.releasedAt
+              ? `Released on ${formatDate(goal.releasedAt)}${goal.releasedAmount != null ? ` · ${money(goal.releasedAmount)} returned to wallet` : ""}`
+              : "Funds returned to wallet"
+            : completed
+              ? goal.completedAt
+                ? `Reached on ${formatDate(goal.completedAt)}`
+                : "Fully funded"
+              : cancelled
+                ? "This goal was cancelled"
+                : `${money(remaining)} to go \u00B7 ${paused ? "paused" : timeLeftLabel(daysLeftOf(goal))}`}
         </p>
+        <AutomationLine goal={goal} />
       </div>
 
-      <div className="mt-5">
-        {completed ? (
+      <div className="mt-5 grid gap-2">
+        {released ? (
+          <Button
+            disabled
+            className="h-12 w-full rounded-xl text-[15px] font-semibold"
+            variant="outline"
+          >
+            <Undo2 aria-hidden="true" /> Funds returned to wallet
+          </Button>
+        ) : completed ? (
           <Button
             disabled
             className="h-12 w-full rounded-xl text-[15px] font-semibold"
@@ -329,6 +503,59 @@ function GoalCard({ goal, busy, onAdd, onEdit, onDelete, onStatus }) {
             <Plus aria-hidden="true" /> Add money
           </Button>
         )}
+
+        {!terminal ? (
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              variant="outline"
+              disabled={autoBusy}
+              onClick={() => (autoPaused ? onResumeAutomation(goal) : onPauseAutomation(goal))}
+              className="h-10 rounded-xl text-sm font-semibold"
+              title={a.enabled ? (autoPaused ? "Resume automatic saving" : "Pause automatic saving") : "Set up automatic saving"}
+            >
+              {autoBusy ? (
+                <Loader2 className="animate-spin" aria-hidden="true" />
+              ) : autoPaused ? (
+                <Play aria-hidden="true" />
+              ) : (
+                <Pause aria-hidden="true" />
+              )}
+              {a.enabled ? (autoPaused ? "Resume auto" : "Pause auto") : "Auto-save"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => onHistory(goal)}
+              className="h-10 rounded-xl text-sm font-semibold"
+            >
+              <History aria-hidden="true" /> History
+            </Button>
+          </div>
+        ) : (
+          <Button
+            variant="ghost"
+            onClick={() => onHistory(goal)}
+            className="h-10 w-full rounded-xl text-sm font-semibold"
+          >
+            <History aria-hidden="true" /> Transfer history
+          </Button>
+        )}
+
+        {goal.status === "active" ? (
+          <Button
+            variant="ghost"
+            disabled={runPending}
+            onClick={() => onRunNow(goal)}
+            className="h-10 w-full rounded-xl text-sm font-semibold text-muted-foreground"
+            title="Demo only: process the currently-due cycle now"
+          >
+            {runPending ? (
+              <Loader2 className="animate-spin" aria-hidden="true" />
+            ) : (
+              <RefreshCw aria-hidden="true" />
+            )}
+            Run now (demo)
+          </Button>
+        ) : null}
       </div>
     </article>
   );
@@ -370,23 +597,73 @@ function Panel({ icon: Icon, tone, title, children }) {
   );
 }
 
+function ConfirmDialog({ open, title, description, confirmLabel, danger, pending, onCancel, onConfirm }) {
+  return (
+    <Dialog open={open} onOpenChange={(next) => { if (!next && !pending) onCancel?.(); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" className="h-10 rounded-xl px-4" onClick={onCancel} disabled={pending}>
+            Cancel
+          </Button>
+          <Button
+            variant={danger ? "destructive" : "default"}
+            className={cn("h-10 rounded-xl px-4", !danger && PRIMARY_BTN)}
+            onClick={onConfirm}
+            disabled={pending}
+          >
+            {pending ? <Loader2 className="animate-spin" aria-hidden="true" /> : null}
+            {confirmLabel}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ---------------------------------------------------------------------------
-// Create / edit goal dialog
-// The form is its own component so it starts fresh every time the dialog opens.
+// Create / edit goal dialog (includes automation setup)
 // ---------------------------------------------------------------------------
 
-function GoalForm({ goal, onDone }) {
+function GoalForm({ goal, goals, onDone }) {
   const create = useCreateGoal();
   const update = useUpdateGoal();
+  const autoSave = useUpdateGoalAutomation();
   const editing = Boolean(goal);
-  const pending = create.isPending || update.isPending;
+  const pending = create.isPending || update.isPending || autoSave.isPending;
 
   const initialDate = goal ? toInputDate(new Date(goal.targetDate)) : "";
   const [title, setTitle] = useState(goal?.title ?? "");
   const [description, setDescription] = useState(goal?.description ?? "");
   const [amount, setAmount] = useState(goal ? String(goal.targetAmount) : "");
   const [date, setDate] = useState(initialDate);
+  const [autoEnabled, setAutoEnabled] = useState(Boolean(goal?.automation?.enabled));
+  const [frequency, setFrequency] = useState(goal?.automation?.frequency ?? "monthly");
+  const [percentage, setPercentage] = useState(
+    goal?.automation?.percentage != null ? String(goal.automation.percentage) : "10",
+  );
+  const [priority, setPriority] = useState(
+    goal?.automation?.priority != null ? String(goal.automation.priority) : "",
+  );
   const [error, setError] = useState("");
+
+  const legacyPercentage =
+    editing && isLegacyPercentage(goal?.automation?.percentage)
+      ? goal.automation.percentage
+      : null;
+
+  const duplicatePriority =
+    autoEnabled && priority !== ""
+      ? (goals || []).some(
+          (g) =>
+            (!goal || g._id !== goal._id) &&
+            g.automation?.enabled &&
+            String(g.automation?.priority) === String(Number(priority)),
+        )
+      : false;
 
   const submit = (e) => {
     e.preventDefault();
@@ -403,6 +680,22 @@ function GoalForm({ goal, onDone }) {
     // an overdue goal can keep its old date, any new date must be in the future
     if (date !== initialDate && date < tomorrowInput())
       return setError("The target date must be in the future.");
+
+    let automation;
+    if (autoEnabled) {
+      if (frequency !== "weekly" && frequency !== "monthly")
+        return setError("Choose Weekly or Monthly for auto-save.");
+      // Unchanged legacy percentages pass through untouched (never sent);
+      // every new or changed value must be one of the five options.
+      const pctUnchanged =
+        editing && percentage === String(goal?.automation?.percentage ?? "");
+      if (!pctUnchanged && !AUTO_PERCENTAGES.includes(Number(percentage)))
+        return setError(PERCENTAGE_CHOICES_ERROR);
+      const pri = Number(priority);
+      if (!Number.isInteger(pri) || pri < 1)
+        return setError("Priority must be a positive whole number (1 is highest).");
+      automation = { enabled: true, frequency, percentage: Number(percentage), priority: pri };
+    }
     setError("");
 
     const body = {
@@ -412,17 +705,64 @@ function GoalForm({ goal, onDone }) {
     };
     if (!editing || date !== initialDate) body.targetDate = toIsoDate(date);
 
+    // Basic fields always go to PATCH /:id (it rejects automation payloads).
+    // Automation changes go to PATCH /:id/automation, which accepts partial
+    // updates — unchanged legacy percentages are simply not sent, so old
+    // records are never rewritten or corrupted.
+    const stored = goal?.automation || {};
+    let autoBody = null;
+    if (editing && automation) {
+      autoBody = {};
+      if (autoEnabled !== Boolean(stored.enabled)) autoBody.enabled = true;
+      if (frequency !== stored.frequency) autoBody.frequency = frequency;
+      if (percentage !== String(stored.percentage ?? "")) autoBody.percentage = Number(percentage);
+      if (priority !== String(stored.priority ?? "")) autoBody.priority = Number(priority);
+      // Freshly enabling: send complete details (all validated above).
+      if (autoBody.enabled === true) {
+        autoBody.frequency = frequency;
+        autoBody.percentage = Number(percentage);
+        autoBody.priority = Number(priority);
+      }
+      if (Object.keys(autoBody).length === 0) autoBody = null;
+    }
+    if (editing && stored.enabled && !autoEnabled) {
+      autoBody = { enabled: false };
+    }
+
+    const saveError = (err) =>
+      setError(errorMessage(err, "Could not save the goal. Please try again."));
+
+    const finishAutomation = () => {
+      if (!autoBody) {
+        toast.success("Goal updated");
+        onDone();
+        return;
+      }
+      autoSave.mutate(
+        { id: goal._id, ...autoBody },
+        {
+          onSuccess: () => {
+            toast.success("Goal updated");
+            onDone();
+          },
+          onError: saveError,
+        },
+      );
+    };
+
     const options = {
       onSuccess: () => {
-        toast.success(editing ? "Goal updated" : "Goal created");
-        onDone();
+        if (editing) finishAutomation();
+        else {
+          toast.success("Goal created");
+          onDone();
+        }
       },
-      onError: (err) =>
-        setError(errorMessage(err, "Could not save the goal. Please try again.")),
+      onError: saveError,
     };
 
     if (editing) update.mutate({ id: goal._id, ...body }, options);
-    else create.mutate(body, options);
+    else create.mutate({ ...body, ...(automation ? { automation } : {}) }, options);
   };
 
   return (
@@ -503,6 +843,77 @@ function GoalForm({ goal, onDone }) {
         />
       </div>
 
+      <div className="rounded-2xl border border-input p-4">
+        <label className="flex cursor-pointer items-start gap-2.5">
+          <input
+            type="checkbox"
+            checked={autoEnabled}
+            onChange={(e) => setAutoEnabled(e.target.checked)}
+            className="mt-1 size-4 accent-[#0756A6]"
+          />
+          <span className="text-sm">
+            <span className="font-semibold text-foreground">Enable automatic saving</span>
+            <span className="block text-xs text-muted-foreground">{AUTO_CONSENT}</span>
+          </span>
+        </label>
+
+        {autoEnabled ? (
+          <div className="mt-3 grid gap-3">
+            <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Frequency">
+              {[
+                { value: "weekly", label: "Weekly" },
+                { value: "monthly", label: "Monthly" },
+              ].map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={frequency === opt.value}
+                  onClick={() => setFrequency(opt.value)}
+                  className={cn(
+                    "rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors",
+                    frequency === opt.value
+                      ? "border-primary bg-brand-soft dark:bg-primary/15"
+                      : "border-input bg-card hover:border-primary/40",
+                  )}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <PercentageOptions
+              value={percentage}
+              onChange={setPercentage}
+              idPrefix="goal-pct"
+              legacy={legacyPercentage}
+            />
+            <div className="grid gap-1.5">
+              <Label htmlFor="goal-priority">Priority</Label>
+              <input
+                id="goal-priority"
+                type="number"
+                inputMode="numeric"
+                min="1"
+                step="1"
+                placeholder="1 = highest"
+                value={priority}
+                onChange={(e) => setPriority(e.target.value)}
+                className={CONTROL}
+              />
+            </div>
+            <p className="flex items-start gap-1.5 text-xs leading-relaxed text-muted-foreground">
+              <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+              {PRIORITY_HINT}
+            </p>
+            {duplicatePriority ? (
+              <p role="alert" className="rounded-lg bg-[#FFD21F]/25 px-3 py-2 text-xs font-medium text-[#6b4f00] dark:text-[#FFD21F]">
+                Another automated goal already uses priority {Number(priority)}. Duplicates are allowed, but the oldest goal is funded first on ties.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
       {error ? (
         <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
@@ -529,6 +940,234 @@ function GoalForm({ goal, onDone }) {
 }
 
 // ---------------------------------------------------------------------------
+// Edit automation dialog (priority / frequency / percentage / enable-disable)
+// ---------------------------------------------------------------------------
+
+function AutomationForm({ goal, goals, onDone }) {
+  const save = useUpdateGoalAutomation();
+  const a = autoOf(goal);
+  const [enabled, setEnabled] = useState(Boolean(a.enabled));
+  const [frequency, setFrequency] = useState(a.frequency ?? "monthly");
+  const [percentage, setPercentage] = useState(
+    a.percentage != null ? String(a.percentage) : "10",
+  );
+  const [priority, setPriority] = useState(a.priority != null ? String(a.priority) : "");
+  const [error, setError] = useState("");
+
+  const legacyPercentage = isLegacyPercentage(a.percentage) ? a.percentage : null;
+
+  const duplicatePriority =
+    enabled && priority !== ""
+      ? (goals || []).some(
+          (g) =>
+            g._id !== goal._id &&
+            g.automation?.enabled &&
+            String(g.automation?.priority) === String(Number(priority)),
+        )
+      : false;
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (goal.status !== "active" && enabled) {
+      return setError("Only active goals can enable automation.");
+    }
+    const body = { enabled };
+    if (enabled) {
+      if (frequency !== "weekly" && frequency !== "monthly")
+        return setError("Choose Weekly or Monthly.");
+      // Preserve an unchanged legacy percentage (never resend it); every
+      // new or changed value must be one of the five fixed options.
+      if (percentage !== String(a.percentage ?? "")) {
+        if (!AUTO_PERCENTAGES.includes(Number(percentage)))
+          return setError(PERCENTAGE_CHOICES_ERROR);
+        body.percentage = Number(percentage);
+      } else if (a.percentage == null) {
+        if (!AUTO_PERCENTAGES.includes(Number(percentage)))
+          return setError(PERCENTAGE_CHOICES_ERROR);
+        body.percentage = Number(percentage);
+      }
+      const pri = Number(priority);
+      if (!Number.isInteger(pri) || pri < 1)
+        return setError("Priority must be a positive whole number (1 is highest).");
+      body.frequency = frequency;
+      body.priority = pri;
+    }
+    setError("");
+    save.mutate(
+      { id: goal._id, ...body },
+      {
+        onSuccess: () => {
+          toast.success(enabled ? "Auto-save enabled" : "Auto-save disabled");
+          onDone();
+        },
+        onError: (err) => setError(errorMessage(err, "Could not update automation.")),
+      },
+    );
+  };
+
+  return (
+    <form onSubmit={submit} className="grid gap-4" noValidate>
+      <DialogHeader>
+        <DialogTitle className="font-heading text-lg text-[#064581] dark:text-primary">
+          Automatic saving
+        </DialogTitle>
+        <DialogDescription>
+          {goal.title} · {AUTO_CONSENT}
+        </DialogDescription>
+      </DialogHeader>
+
+      <label className="flex cursor-pointer items-start gap-2.5">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => setEnabled(e.target.checked)}
+          className="mt-1 size-4 accent-[#0756A6]"
+        />
+        <span className="text-sm font-semibold text-foreground">Enable automatic saving</span>
+      </label>
+
+      {enabled ? (
+        <div className="grid gap-3">
+          <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Frequency">
+            {[
+              { value: "weekly", label: "Weekly" },
+              { value: "monthly", label: "Monthly" },
+            ].map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                role="radio"
+                aria-checked={frequency === opt.value}
+                onClick={() => setFrequency(opt.value)}
+                className={cn(
+                  "rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors",
+                  frequency === opt.value
+                    ? "border-primary bg-brand-soft dark:bg-primary/15"
+                    : "border-input bg-card hover:border-primary/40",
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <PercentageOptions
+            value={percentage}
+            onChange={setPercentage}
+            idPrefix="auto-pct"
+            legacy={legacyPercentage}
+          />
+          <div className="grid gap-1.5">
+            <Label htmlFor="auto-priority">Priority</Label>
+            <input
+              id="auto-priority"
+              type="number"
+              inputMode="numeric"
+              min="1"
+              step="1"
+              value={priority}
+              onChange={(e) => setPriority(e.target.value)}
+              className={CONTROL}
+            />
+          </div>
+          <p className="flex items-start gap-1.5 text-xs leading-relaxed text-muted-foreground">
+            <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+            {PRIORITY_HINT}
+          </p>
+          {duplicatePriority ? (
+            <p role="alert" className="rounded-lg bg-[#FFD21F]/25 px-3 py-2 text-xs font-medium text-[#6b4f00] dark:text-[#FFD21F]">
+              Another automated goal already uses priority {Number(priority)}. Oldest first on ties.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {error ? (
+        <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+
+      <DialogFooter>
+        <Button type="button" variant="outline" className="h-10 rounded-xl px-4" onClick={onDone} disabled={save.isPending}>
+          Cancel
+        </Button>
+        <Button type="submit" className={cn("h-10 px-5", PRIMARY_BTN)} disabled={save.isPending}>
+          {save.isPending ? <Loader2 className="animate-spin" aria-hidden="true" /> : null}
+          Save
+        </Button>
+      </DialogFooter>
+    </form>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Transfer history dialog (immutable audit ledger)
+// ---------------------------------------------------------------------------
+
+function TransferHistoryDialog({ goal, onClose }) {
+  const { data, isLoading, error } = useGoalTransfers(goal?._id);
+  const transfers = data?.transfers ?? [];
+  return (
+    <Dialog open={Boolean(goal)} onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="font-heading text-lg text-[#064581] dark:text-primary">
+            Transfer history
+          </DialogTitle>
+          <DialogDescription>
+            {goal ? `${goal.title} · every automatic move is recorded here and never deleted.` : ""}
+          </DialogDescription>
+        </DialogHeader>
+        {isLoading ? (
+          <div className="space-y-2" role="status" aria-label="Loading transfers">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-14 w-full rounded-xl bg-muted" />
+            ))}
+          </div>
+        ) : error ? (
+          <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {errorMessage(error, "Could not load transfer history.")}
+          </p>
+        ) : transfers.length === 0 ? (
+          <p className="rounded-xl bg-muted px-3 py-4 text-center text-sm text-muted-foreground">
+            No automatic transfers yet for this goal.
+          </p>
+        ) : (
+          <ul className="max-h-80 space-y-2 overflow-y-auto pr-1">
+            {transfers.map((t) => (
+              <li key={t._id} className="rounded-xl border border-input px-3 py-2.5 text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-foreground">
+                    {t.type === "goal_release"
+                      ? "Released to wallet"
+                      : t.type === "goal_cancelled_refund"
+                        ? "Cancelled — refunded to wallet"
+                        : t.type === "manual_contribution"
+                          ? "Manual contribution"
+                          : "Auto contribution"}
+                  </span>
+                  <span className="font-bold text-[#064581] tabular-nums dark:text-primary">
+                    {money(t.amount)}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">
+                  Cycle {t.cycleKey} · {formatDateTime(t.createdAt)} · Wallet {money(t.walletBalanceBefore)} → {money(t.walletBalanceAfter)}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+        <DialogFooter>
+          <Button variant="outline" className="h-10 rounded-xl px-4" onClick={onClose}>
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Add money dialog
 // ---------------------------------------------------------------------------
 
@@ -537,6 +1176,15 @@ function AddMoneyForm({ goal, onDone }) {
   const remaining = remainingOf(goal);
   const [amount, setAmount] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  // One UUID per dialog attempt: double-clicks and network retries resend
+  // the same key, so the backend returns the original transfer instead of
+  // deducting the wallet twice.
+  const [idempotencyKey] = useState(() =>
+    typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
 
   const value = Number(amount);
   const valid = Number.isFinite(value) && value > 0;
@@ -554,11 +1202,19 @@ function AddMoneyForm({ goal, onDone }) {
     setError("");
 
     add.mutate(
-      { id: goal._id, amount: value },
+      { id: goal._id, amount: value, idempotencyKey },
       {
         onSuccess: (res) => {
+          // A retried request returns the original transfer with
+          // duplicate: true — an expected outcome, not an error.
+          if (res?.duplicate) {
+            const msg = `Already recorded: ${money(res?.transfer?.amount ?? value)} is in ${goal.title}. No money was moved again.`;
+            setNotice(msg);
+            toast.info(msg);
+            return;
+          }
           if (res?.goal?.status === "completed")
-            toast.success(`You reached "${goal.title}"!`);
+            toast.success(`You reached "${goal.title}"! ${money(value)} moved to the goal.`);
           else toast.success(`${money(value)} added to ${goal.title}`);
           onDone();
         },
@@ -648,6 +1304,11 @@ function AddMoneyForm({ goal, onDone }) {
           {error}
         </p>
       ) : null}
+      {notice ? (
+        <p role="status" className="rounded-lg bg-[#eaf3fc] px-3 py-2 text-sm text-[#064581] dark:bg-primary/15 dark:text-primary">
+          {notice}
+        </p>
+      ) : null}
 
       <DialogFooter>
         <Button
@@ -679,18 +1340,23 @@ function AddMoneyForm({ goal, onDone }) {
 const Goals = () => {
   const { data, isLoading, isFetching, error, refetch } = useGoals();
   const statusMutation = useUpdateGoalStatus();
+  const autoMutation = useUpdateGoalAutomation();
+  const runNow = useRunAutomationNow();
   const remove = useDeleteGoal();
 
   const [tab, setTab] = useState("all");
   const [formGoal, setFormGoal] = useState(null); // goal being edited
   const [formOpen, setFormOpen] = useState(false);
+  const [autoGoal, setAutoGoal] = useState(null); // goal whose automation is edited
   const [addGoal, setAddGoal] = useState(null);
   const [toDelete, setToDelete] = useState(null);
+  const [historyGoal, setHistoryGoal] = useState(null);
+  const [confirm, setConfirm] = useState(null); // { kind, goal }
 
   const goals = useMemo(() => data?.goals ?? [], [data]);
 
   const counts = useMemo(() => {
-    const c = { all: goals.length, active: 0, paused: 0, completed: 0 };
+    const c = { all: goals.length, active: 0, paused: 0, completed: 0, released: 0 };
     for (const g of goals) if (g.status in c) c[g.status] += 1;
     return c;
   }, [goals]);
@@ -729,19 +1395,117 @@ const Goals = () => {
     );
   };
 
+  const runNowForUser = () => {
+    runNow.mutate(undefined, {
+      onSuccess: (res) => {
+        const c = res?.summary?.contributions ?? [];
+        const r = res?.summary?.releases ?? [];
+        const funded = c.filter((x) => x.status === "contributed");
+        const released = r.filter((x) => x.status === "released");
+        const fundedTotal = funded.reduce((s, x) => s + (Number(x.amount) || 0), 0);
+        const releasedTotal = released.reduce((s, x) => s + (Number(x.amount) || 0), 0);
+        const parts = [];
+        parts.push(
+          funded.length > 0
+            ? `${funded.length} contribution${funded.length === 1 ? "" : "s"} (${money(fundedTotal)})`
+            : "no new contributions",
+        );
+        parts.push(
+          released.length > 0
+            ? `${released.length} release${released.length === 1 ? "" : "s"} (${money(releasedTotal)})`
+            : "no releases",
+        );
+        toast.success(`Cycle processed: ${parts.join(", ")}.`);
+      },
+      onError: (err) => toast.error(errorMessage(err, "Could not run the cycle.")),
+    });
+  };
+
   const confirmDelete = () => {
     if (!toDelete) return;
-    remove.mutate(toDelete._id, {
-      onSuccess: () => {
-        toast.success("Goal deleted");
-        setToDelete(null);
+    const idempotencyKey =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    remove.mutate(
+      { id: toDelete._id, idempotencyKey },
+      {
+        onSuccess: (res) => {
+          const refunded = Number(res?.refundedAmount) || 0;
+          if (res?.duplicate) {
+            toast.info(
+              refunded > 0
+                ? `Already deleted: ${money(refunded)} was already returned to your wallet.`
+                : "Already deleted.",
+            );
+          } else if (refunded > 0) {
+            toast.success(`Goal deleted. ${money(refunded)} returned to your wallet.`);
+          } else {
+            toast.success("Goal deleted");
+          }
+          setToDelete(null);
+        },
+        onError: (err) => toast.error(errorMessage(err, "Could not delete the goal.")),
       },
-      onError: (err) => toast.error(errorMessage(err, "Could not delete the goal.")),
-    });
+    );
+  };
+
+  const confirmAutomation = () => {
+    if (!confirm) return;
+    const { kind, goal } = confirm;
+    const body =
+      kind === "pause-auto"
+        ? { paused: true }
+        : kind === "resume-auto"
+          ? { paused: false }
+          : kind === "disable-auto"
+            ? { enabled: false }
+            : null;
+    if (!body) return;
+    autoMutation.mutate(
+      { id: goal._id, ...body },
+      {
+        onSuccess: () => {
+          toast.success(
+            kind === "pause-auto"
+              ? "Auto-save paused"
+              : kind === "resume-auto"
+                ? "Auto-save resumed"
+                : "Auto-save disabled",
+          );
+          setConfirm(null);
+        },
+        onError: (err) => toast.error(errorMessage(err, "Could not update automation.")),
+      },
+    );
   };
 
   const busyId =
     statusMutation.isPending ? statusMutation.variables?.id : null;
+  const autoBusyId =
+    autoMutation.isPending ? autoMutation.variables?.id : null;
+
+  const confirmText = (kind, goal) => {
+    if (kind === "pause-auto")
+      return {
+        title: "Pause automatic saving?",
+        description: `"${goal?.title}" will stop receiving automatic transfers until you resume it. Money already saved stays in the goal.`,
+        confirmLabel: "Pause auto-save",
+      };
+    if (kind === "resume-auto")
+      return {
+        title: "Resume automatic saving?",
+        description: `"${goal?.title}" will receive automatic transfers again from the next due cycle.`,
+        confirmLabel: "Resume auto-save",
+      };
+    if (kind === "disable-auto")
+      return {
+        title: "Disable automatic saving?",
+        description: `"${goal?.title}" will stop receiving automatic transfers. Money already saved stays in the goal.`,
+        confirmLabel: "Disable auto-save",
+      };
+    return { title: "", description: "", confirmLabel: "Confirm" };
+  };
 
   return (
     <div className="mx-auto w-full max-w-[1400px] space-y-6">
@@ -754,13 +1518,38 @@ const Goals = () => {
             Small, steady deposits add up.
           </p>
         </div>
-        <Button
-          variant="outline"
-          onClick={openCreate}
-          className="h-12 rounded-xl border-[#064581] bg-card px-5 text-[15px] font-semibold text-[#064581] hover:bg-brand-soft dark:border-primary dark:text-primary dark:hover:bg-primary/15"
-        >
-          <Plus aria-hidden="true" /> New goal
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={runNowForUser}
+            disabled={runNow.isPending}
+            className="h-12 rounded-xl px-5 text-[15px] font-semibold"
+            title="Demo only: process releases + the currently-due cycle for your account"
+          >
+            {runNow.isPending ? (
+              <Loader2 className="animate-spin" aria-hidden="true" />
+            ) : (
+              <RefreshCw aria-hidden="true" />
+            )}
+            Run now (demo)
+          </Button>
+          <Button
+            variant="outline"
+            onClick={openCreate}
+            className="h-12 rounded-xl border-[#064581] bg-card px-5 text-[15px] font-semibold text-[#064581] hover:bg-brand-soft dark:border-primary dark:text-primary dark:hover:bg-primary/15"
+          >
+            <Plus aria-hidden="true" /> New goal
+          </Button>
+        </div>
+      </div>
+
+      <div className="flex items-start gap-2 rounded-2xl border border-[#0756A6]/20 bg-[#EAF3FC] px-4 py-3 text-sm leading-relaxed text-[#064581] dark:bg-primary/10 dark:text-primary">
+        <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+        <p>
+          {PRIORITY_HINT} Weekly cycles run every Sunday, monthly cycles on the
+          1st — or press “Run now (demo)” to process the currently-due cycle
+          immediately.
+        </p>
       </div>
 
       {goals.length > 0 ? (
@@ -768,7 +1557,7 @@ const Goals = () => {
           <div
             role="tablist"
             aria-label="Filter goals"
-            className="inline-flex gap-1 rounded-xl bg-muted p-1"
+            className="inline-flex max-w-full gap-1 overflow-x-auto rounded-xl bg-muted p-1"
           >
             {TABS.map((t) => (
               <button
@@ -778,7 +1567,7 @@ const Goals = () => {
                 aria-selected={tab === t.value}
                 onClick={() => setTab(t.value)}
                 className={cn(
-                  "h-9 rounded-lg px-3.5 text-sm font-semibold transition",
+                  "h-9 rounded-lg px-3.5 text-sm font-semibold whitespace-nowrap transition",
                   tab === t.value
                     ? "bg-card text-[#064581] shadow-sm dark:text-primary"
                     : "text-muted-foreground hover:text-foreground",
@@ -849,10 +1638,17 @@ const Goals = () => {
               key={goal._id}
               goal={goal}
               busy={busyId === goal._id}
+              autoBusy={autoBusyId === goal._id}
               onAdd={setAddGoal}
               onEdit={openEdit}
               onDelete={setToDelete}
               onStatus={changeStatus}
+              onAutomation={setAutoGoal}
+              onPauseAutomation={(g) => setConfirm({ kind: "pause-auto", goal: g })}
+              onResumeAutomation={(g) => setConfirm({ kind: "resume-auto", goal: g })}
+              onHistory={setHistoryGoal}
+              onRunNow={runNowForUser}
+              runPending={runNow.isPending}
             />
           ))}
         </div>
@@ -865,8 +1661,26 @@ const Goals = () => {
           if (!next) setFormOpen(false);
         }}
       >
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
+          <GoalForm goal={formGoal} goals={goals} onDone={() => setFormOpen(false)} />
+        </DialogContent>
+      </Dialog>
+
+      {/* automation edit */}
+      <Dialog
+        open={Boolean(autoGoal)}
+        onOpenChange={(next) => {
+          if (!next && !autoMutation.isPending) setAutoGoal(null);
+        }}
+      >
         <DialogContent className="sm:max-w-md">
-          <GoalForm goal={formGoal} onDone={() => setFormOpen(false)} />
+          {autoGoal ? (
+            <AutomationForm
+              goal={goals.find((g) => g._id === autoGoal._id) ?? autoGoal}
+              goals={goals}
+              onDone={() => setAutoGoal(null)}
+            />
+          ) : null}
         </DialogContent>
       </Dialog>
 
@@ -888,6 +1702,24 @@ const Goals = () => {
         </DialogContent>
       </Dialog>
 
+      {/* transfer history */}
+      {historyGoal ? (
+        <TransferHistoryDialog goal={historyGoal} onClose={() => setHistoryGoal(null)} />
+      ) : null}
+
+      {/* pause / resume / disable automation */}
+      {confirm ? (
+        <ConfirmDialog
+          open={Boolean(confirm)}
+          title={confirmText(confirm.kind, confirm.goal).title}
+          description={confirmText(confirm.kind, confirm.goal).description}
+          confirmLabel={confirmText(confirm.kind, confirm.goal).confirmLabel}
+          pending={autoMutation.isPending}
+          onCancel={() => setConfirm(null)}
+          onConfirm={confirmAutomation}
+        />
+      ) : null}
+
       {/* delete */}
       <Dialog
         open={Boolean(toDelete)}
@@ -900,7 +1732,9 @@ const Goals = () => {
             <DialogTitle>Delete this goal?</DialogTitle>
             <DialogDescription>
               {toDelete
-                ? `"${toDelete.title}" and its ${money(toDelete.savedAmount)} of progress will be removed. Your wallet and transactions are not changed.`
+                ? Number(toDelete.savedAmount) > 0
+                  ? `"${toDelete.title}" will be permanently deleted and ${money(toDelete.savedAmount)} will be returned to your wallet as a Savings income transaction.`
+                  : `"${toDelete.title}" will be permanently deleted. No money will be returned (nothing saved yet).`
                 : null}
             </DialogDescription>
           </DialogHeader>

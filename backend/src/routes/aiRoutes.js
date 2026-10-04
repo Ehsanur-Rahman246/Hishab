@@ -5,6 +5,11 @@ import {
   checkAiHealth,
   getLatestInsights,
 } from "../controllers/aiControllers.js";
+import {
+  confirmGoalAddMoney,
+  confirmGoalDelete,
+  requestGoalDelete,
+} from "../controllers/aiGoalControllers.js";
 import authMiddleware from "../middleware/authMiddleware.js";
 import { coachRateLimit } from "../middleware/rateLimit.js";
 
@@ -23,5 +28,15 @@ aiRouter.get("/latest-insights", authMiddleware, getLatestInsights);
 // POST /api/ai/coach -> bilingual AI Financial Coach (Groq via backend only).
 // Body: { message, language? }. Rate-limited per user.
 aiRouter.post("/coach", authMiddleware, coachRateLimit, askCoach);
+
+// Goal actions via chat: deterministic, JWT-scoped, confirmation-gated.
+// request proposes (never deletes); confirm executes via the shared
+// executeGoalDeletion service. Both rate-limited like coach.
+aiRouter.post("/goals/delete-request", authMiddleware, coachRateLimit, requestGoalDelete);
+aiRouter.post("/goals/delete-confirm", authMiddleware, coachRateLimit, confirmGoalDelete);
+
+// Chat add-money: explicit goal choice for an ambiguous command.
+// All checks + money movement run server-side via executeManualContribution.
+aiRouter.post("/goals/add-money-confirm", authMiddleware, coachRateLimit, confirmGoalAddMoney);
 
 export default aiRouter;

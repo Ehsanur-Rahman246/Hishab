@@ -49,7 +49,7 @@ const initialForm = () => ({
   businessCurrency: "BDT",
   foreignRows: [{ id: 1, amount: "", currency: "USD", label: "" }],
   deductibleLiabilitiesBdt: "",
-  interestAmountToExcludeBdt: "",
+  pensionBdt: "",
 });
 
 const parseNonNegative = (raw, label, errors) => {
@@ -206,7 +206,7 @@ export default function Zakat() {
         goldGrams: 0,
         silverGrams: 0,
         deductibleLiabilitiesBdt: 0,
-        interestAmountToExcludeBdt: 0,
+        pensionBdt: 0,
       },
       {
         onSuccess: (data) => {
@@ -276,9 +276,9 @@ export default function Zakat() {
         "Deductible liabilities",
         errors,
       ),
-      interestAmountToExcludeBdt: parseNonNegative(
-        form.interestAmountToExcludeBdt,
-        "Interest to exclude",
+      pensionBdt: parseNonNegative(
+        form.pensionBdt,
+        "Pension amount",
         errors,
       ),
     };
@@ -330,6 +330,11 @@ export default function Zakat() {
           icon: Banknote,
           label: "Foreign assets",
           value: calcData.breakdown.foreignAssetsBdt,
+        },
+        {
+          icon: HandCoins,
+          label: "Pension amount",
+          value: calcData.breakdown.pensionBdt,
         },
       ]
     : [];
@@ -652,20 +657,17 @@ export default function Zakat() {
                 hint="Debts due within the year"
               />
               <NumberField
-                id="zakat-interest"
-                label="Interest amount to exclude (BDT)"
-                value={form.interestAmountToExcludeBdt}
-                onChange={(v) => set({ interestAmountToExcludeBdt: v })}
-                hint="Subtracted before eligibility"
+                id="zakat-pension"
+                label="Accessible pension amount (BDT)"
+                value={form.pensionBdt}
+                onChange={(v) => set({ pensionBdt: v })}
+                hint="Enter only pension funds you choose to include in this estimate. This value is not saved."
               />
             </div>
             <p className="flex items-start gap-1.5 rounded-xl bg-brand-soft dark:bg-primary/15 px-3 py-2 text-xs leading-relaxed text-[#064581] dark:text-primary">
               <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-              Hishab cannot reliably identify interest from one combined wallet
-              balance. Enter the interest portion you want excluded — it is
-              subtracted before eligibility and Zakat are computed, and the
-              exact excluded amount appears in the breakdown. No AI guessing is
-              used.
+              Net zakatable wealth is calculated as total zakatable assets
+              minus deductible liabilities. No other deductions are applied.
             </p>
           </CardContent>
         </Card>
@@ -798,12 +800,6 @@ export default function Zakat() {
                     </dt>
                     <dd className="font-semibold text-foreground">
                       {formatBDT(calcData.breakdown.grossZakatableAssetsBdt)}
-                    </dd>
-                  </div>
-                  <div className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                    <dt className="text-muted-foreground">Interest excluded</dt>
-                    <dd className="font-semibold text-foreground">
-                      −{formatBDT(calcData.breakdown.interestExcludedBdt)}
                     </dd>
                   </div>
                   <div className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
