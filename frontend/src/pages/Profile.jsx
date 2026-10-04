@@ -365,7 +365,7 @@ export default function Profile() {
             title="Wallet"
             subtitle={
               wallet
-                ? `${wallet.walletNumber} \u2022 ${formatBDTWhole(wallet.balance)}`
+                ? wallet.walletNumber
                 : walletQuery.isPending
                   ? "Loading\u2026"
                   : "Wallet not available"

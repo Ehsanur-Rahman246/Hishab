@@ -1,10 +1,66 @@
 import Goal from "../models/Goal.js";
+import GoalTransfer from "../models/GoalTransfer.js";
+import {
+  executeGoalDeletion,
+  executeManualContribution,
+  isAllowedAutomationPercentage,
+  isValidPercentage,
+  isValidPriority,
+  runDueAutomationForUser,
+} from "../services/goalAutomationService.js";
+
+const VALID_FREQUENCIES = ["weekly", "monthly"];
+const PERCENTAGE_CHOICES_LABEL = "5, 10, 15, 20, or 25";
+
+// Validate automation payload. Returns { ok, errors, value }.
+const validateAutomationInput = (body, { allowPartial = false } = {}) => {
+  const errors = [];
+  const value = {};
+  if (!body || typeof body !== "object") {
+    return { ok: false, errors: ["Invalid automation details."], value: null };
+  }
+  if (body.enabled !== undefined) {
+    if (typeof body.enabled !== "boolean") errors.push("automation.enabled must be true or false.");
+    else value.enabled = body.enabled;
+  } else if (!allowPartial) {
+    value.enabled = false;
+  }
+  if (body.frequency !== undefined) {
+    if (!VALID_FREQUENCIES.includes(body.frequency)) errors.push("automation.frequency must be 'weekly' or 'monthly'.");
+    else value.frequency = body.frequency;
+  } else if (!allowPartial && value.enabled) {
+    errors.push("automation.frequency is required when automation is enabled.");
+  }
+  if (body.percentage !== undefined) {
+    const n = Number(body.percentage);
+    if (!isAllowedAutomationPercentage(n))
+      errors.push(`automation.percentage must be one of: ${PERCENTAGE_CHOICES_LABEL}.`);
+    else value.percentage = n;
+  } else if (!allowPartial && value.enabled) {
+    errors.push("automation.percentage is required when automation is enabled.");
+  }
+  if (body.priority !== undefined) {
+    const n = Number(body.priority);
+    if (!isValidPriority(n)) errors.push("automation.priority must be a positive integer.");
+    else value.priority = n;
+  } else if (!allowPartial && value.enabled) {
+    errors.push("automation.priority is required when automation is enabled.");
+  }
+  if (body.paused !== undefined) {
+    if (typeof body.paused !== "boolean") errors.push("automation.paused must be true or false.");
+    else value.paused = body.paused;
+  }
+  if (errors.length > 0) return { ok: false, errors, value: null };
+  return { ok: true, errors: [], value };
+};
+
+const automationView = (goal) => goal.automation || { enabled: false };
 
 export const createGoal = async (req, res) => {
   try {
     const userId = req.user.userId;
 
-    const { title, description, targetAmount, targetDate } = req.body;
+    const { title, description, targetAmount, targetDate, automation } = req.body;
 
     if (!title || !targetAmount || !targetDate) {
       return res.status(400).json({
@@ -36,12 +92,32 @@ export const createGoal = async (req, res) => {
       });
     }
 
+    let automationDoc = { enabled: false, paused: false, lastProcessedCycle: null, enabledAt: null };
+    if (automation !== undefined && automation !== null) {
+      const checked = validateAutomationInput(automation);
+      if (!checked.ok) {
+        return res.status(400).json({ success: false, message: checked.errors[0], errors: checked.errors });
+      }
+      if (checked.value.enabled) {
+        automationDoc = {
+          enabled: true,
+          frequency: checked.value.frequency,
+          percentage: checked.value.percentage,
+          priority: checked.value.priority,
+          paused: false,
+          lastProcessedCycle: null,
+          enabledAt: new Date(),
+        };
+      }
+    }
+
     const goal = await Goal.create({
       user: userId,
       title,
       description: description || null,
       targetAmount: Number(targetAmount),
       targetDate: targetDateValue,
+      automation: automationDoc,
     });
 
     return res.status(201).json({
@@ -119,6 +195,14 @@ export const updateGoal = async (req, res) => {
 
     const { title, description, targetAmount, targetDate } = req.body;
 
+    // Automation fields are never accepted here — use PATCH /:id/automation.
+    if (req.body.savedAmount !== undefined || req.body.automation !== undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "Use the automation endpoint to change savings or automation details.",
+      });
+    }
+
     const goal = await Goal.findOne({
       _id: id,
       user: userId,
@@ -128,6 +212,13 @@ export const updateGoal = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: "Goal not found",
+      });
+    }
+
+    if (goal.status === "released") {
+      return res.status(400).json({
+        success: false,
+        message: "Released goals cannot be edited.",
       });
     }
 
@@ -161,7 +252,7 @@ export const updateGoal = async (req, res) => {
         });
       }
 
-      if (targetDateValue <= new Date()) {
+      if (goal.status === "active" && targetDateValue <= new Date()) {
         return res.status(400).json({
           success: false,
           message: "Target date must be in the future",
@@ -196,33 +287,140 @@ export const updateGoal = async (req, res) => {
   }
 };
 
-export const deleteGoal = async (req, res) => {
+// PATCH /api/goals/:id/automation — enable/disable, frequency, percentage,
+// priority, pause/resume. Never accepts savedAmount.
+export const updateGoalAutomation = async (req, res) => {
   try {
     const userId = req.user.userId;
     const { id } = req.params;
 
-    const goal = await Goal.findOneAndDelete({
-      _id: id,
-      user: userId,
-    });
-
-    if (!goal) {
-      return res.status(404).json({
+    if (req.body.savedAmount !== undefined) {
+      return res.status(400).json({
         success: false,
-        message: "Goal not found",
+        message: "savedAmount cannot be set directly.",
+      });
+    }
+
+    const goal = await Goal.findOne({ _id: id, user: userId });
+    if (!goal) {
+      return res.status(404).json({ success: false, message: "Goal not found" });
+    }
+    if (goal.status === "released") {
+      return res.status(400).json({ success: false, message: "Released goals cannot enable automation." });
+    }
+    if (goal.status !== "active" && req.body.enabled === true) {
+      return res.status(400).json({
+        success: false,
+        message: "Only active goals can enable automation.",
+      });
+    }
+
+    const checked = validateAutomationInput(req.body, { allowPartial: true });
+    if (!checked.ok) {
+      return res.status(400).json({ success: false, message: checked.errors[0], errors: checked.errors });
+    }
+    const v = checked.value;
+    const auto = goal.automation || {};
+    const enabling = v.enabled === true && !auto.enabled;
+
+    if (v.enabled !== undefined) {
+      if (v.enabled && goal.status !== "active") {
+        return res.status(400).json({ success: false, message: "Only active goals can enable automation." });
+      }
+      goal.automation.enabled = v.enabled;
+      if (v.enabled && !goal.automation.enabledAt) goal.automation.enabledAt = new Date();
+      if (enabling) {
+        goal.automation.paused = false;
+        if (!goal.automation.enabledAt) goal.automation.enabledAt = new Date();
+      }
+      if (!v.enabled) goal.automation.paused = false;
+    }
+    if (v.frequency !== undefined) goal.automation.frequency = v.frequency;
+    if (v.percentage !== undefined) goal.automation.percentage = v.percentage;
+    if (v.priority !== undefined) goal.automation.priority = v.priority;
+    if (v.paused !== undefined) {
+      if (v.paused && !goal.automation.enabled) {
+        return res.status(400).json({ success: false, message: "Enable automation before pausing it." });
+      }
+      goal.automation.paused = v.paused;
+    }
+
+    // Enabling requires complete details. New/changed percentages must be
+    // one of the five fixed options; legacy stored values (any 1–100) keep
+    // working and are never rewritten here.
+    if (goal.automation.enabled) {
+      if (!VALID_FREQUENCIES.includes(goal.automation.frequency)) {
+        return res.status(400).json({ success: false, message: "automation.frequency must be 'weekly' or 'monthly'." });
+      }
+      if (v.percentage !== undefined && !isAllowedAutomationPercentage(goal.automation.percentage)) {
+        return res.status(400).json({
+          success: false,
+          message: `automation.percentage must be one of: ${PERCENTAGE_CHOICES_LABEL}.`,
+        });
+      }
+      if (!isValidPercentage(goal.automation.percentage)) {
+        return res.status(400).json({ success: false, message: "automation.percentage is invalid. Pick one of: 5, 10, 15, 20, or 25." });
+      }
+      if (!isValidPriority(goal.automation.priority)) {
+        return res.status(400).json({ success: false, message: "automation.priority must be a positive integer." });
+      }
+    }
+
+    await goal.save();
+    return res.status(200).json({ success: true, message: "Automation updated successfully", goal, automation: automationView(goal) });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+export const deleteGoal = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { id } = req.params;
+    const idempotencyKey =
+      (typeof req.body?.idempotencyKey === "string" && req.body.idempotencyKey) ||
+      (typeof req.headers["x-idempotency-key"] === "string" && req.headers["x-idempotency-key"]) ||
+      undefined;
+
+    const result = await executeGoalDeletion({ userId, goalId: id, idempotencyKey });
+
+    // Ledger records are the audit trail and are never deleted.
+    if (result.status === "duplicate") {
+      return res.status(200).json({
+        success: true,
+        duplicate: true,
+        message: result.refundedAmount > 0
+          ? `This goal was already deleted; ${result.refundedAmount} was already returned to your wallet. No money was moved again.`
+          : "This goal was already deleted; no money was moved again.",
+        refundedAmount: result.refundedAmount,
+        title: result.title,
+        transfer: result.transfer,
       });
     }
 
     return res.status(200).json({
       success: true,
-      message: "Goal deleted successfully",
+      message:
+        result.refundedAmount > 0
+          ? `Goal deleted. ${result.refundedAmount} returned to your wallet.`
+          : "Goal deleted successfully",
+      refundedAmount: result.refundedAmount,
+      title: result.title,
+      alreadyReleased: Boolean(result.alreadyReleased),
     });
   } catch (error) {
-    console.error(error);
+    if (error?.statusCode === 404) {
+      return res.status(404).json({ success: false, message: error.message || "Goal not found" });
+    }
+    if (String(error?.message || "").includes("replica set")) {
+      return res.status(503).json({ success: false, message: error.message });
+    }
+    console.error("Goal deletion failed:", error?.message || error);
 
     return res.status(500).json({
       success: false,
-      message: "Internal server error",
+      message: "Could not delete the goal. No money was moved. Please try again.",
     });
   }
 };
@@ -370,70 +568,51 @@ export const updatePlan = async (req, res) => {
   }
 };
 
+// POST /api/goals/:id/add-savings — manual Wallet -> Goal transfer.
+// Atomic (Wallet deduct + Goal credit + GoalTransfer ledger row +
+// Savings expense Transaction in one MongoDB transaction) and
+// idempotent: resend the same idempotencyKey and the original transfer is
+// returned without moving money again.
 export const addSavings = async (req, res) => {
   try {
     const userId = req.user.userId;
     const { id } = req.params;
-    const { amount } = req.body;
+    const { amount, idempotencyKey } = req.body;
 
-    const value = Number(amount);
-
-    if (!Number.isFinite(value) || value <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Amount must be greater than 0",
-      });
-    }
-
-    const goal = await Goal.findOne({
-      _id: id,
-      user: userId,
+    const result = await executeManualContribution({
+      userId,
+      goalId: id,
+      amount,
+      idempotencyKey,
     });
 
-    if (!goal) {
-      return res.status(404).json({
-        success: false,
-        message: "Goal not found",
+    if (result.status === "duplicate") {
+      return res.status(200).json({
+        success: true,
+        duplicate: true,
+        message: "This transfer was already processed; no money was moved again.",
+        goal: result.goal,
+        transfer: result.transfer,
       });
     }
-
-    if (goal.status !== "active") {
-      return res.status(400).json({
-        success: false,
-        message: "Savings can only be added to an active goal",
-      });
-    }
-
-    const newSavedAmount = goal.savedAmount + value;
-
-    if (newSavedAmount > goal.targetAmount) {
-      return res.status(400).json({
-        success: false,
-        message: "Savings cannot exceed the target amount",
-      });
-    }
-
-    goal.savedAmount = newSavedAmount;
-
-    if (goal.savedAmount === goal.targetAmount) {
-      goal.status = "completed";
-      goal.completedAt = new Date();
-    }
-
-    await goal.save();
 
     return res.status(200).json({
       success: true,
-      message: "Savings added successfully",
-      goal,
+      message: result.completed ? `You reached "${result.goal.title}"!` : "Savings added successfully",
+      goal: result.goal,
+      transfer: result.transfer,
+      completed: result.completed,
     });
   } catch (error) {
-    console.error(error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-    });
+    if (error?.statusCode === 400 || error?.statusCode === 404) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
+    if (String(error?.message || "").includes("replica set")) {
+      return res.status(503).json({ success: false, message: error.message });
+    }
+    // Technical details stay in server logs; clients get a safe message.
+    console.error("Manual goal transfer failed:", error?.message || error);
+    return res.status(500).json({ success: false, message: "Could not complete the transfer. Please try again." });
   }
 };
 
@@ -443,6 +622,7 @@ export const updateGoalStatus = async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
 
+    // "released" is system-only (target-date job / run-now).
     const allowedStatuses = ["active", "paused", "cancelled", "completed"];
 
     if (!allowedStatuses.includes(status)) {
@@ -461,6 +641,13 @@ export const updateGoalStatus = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: "Goal not found",
+      });
+    }
+
+    if (goal.status === "released") {
+      return res.status(400).json({
+        success: false,
+        message: "Released goals cannot change status.",
       });
     }
 
@@ -492,6 +679,55 @@ export const updateGoalStatus = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Internal server error",
+    });
+  }
+};
+
+// GET /api/goals/:id/transfers — audit history for one owned goal.
+export const getGoalTransfers = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { id } = req.params;
+
+    const goal = await Goal.findOne({ _id: id, user: userId }).select("_id");
+    if (!goal) {
+      return res.status(404).json({ success: false, message: "Goal not found" });
+    }
+    const transfers = await GoalTransfer.find({ user: userId, goal: id }).sort({ createdAt: -1 }).lean();
+    return res.status(200).json({ success: true, transfers });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+// POST /api/goals/automation/run-now — demo/test for the logged-in user only.
+// Runs releases + the currently-due cycle with full idempotency/atomicity
+// using the same executeContribution/executeRelease logic as the scheduler.
+export const runAutomationNow = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    // Never accept another userId: the JWT user is the only scope.
+    if (req.body && (req.body.userId || req.body.user)) {
+      return res.status(400).json({
+        success: false,
+        message: "userId must not be provided; the logged-in user is used.",
+      });
+    }
+    const summary = await runDueAutomationForUser(userId, new Date());
+    return res.status(200).json({ success: true, message: "Automation cycle processed.", summary });
+  } catch (error) {
+    if (String(error?.message || "").includes("replica set")) {
+      return res.status(503).json({ success: false, message: error.message });
+    }
+    if (error?.statusCode === 400 || error?.statusCode === 404) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
+    // Technical details stay in server logs; clients get a safe message.
+    console.error("Automation run-now failed:", error?.message || error);
+    return res.status(500).json({
+      success: false,
+      message: "Could not process the automation cycle. No money was moved by the failed step. Please try again.",
     });
   }
 };

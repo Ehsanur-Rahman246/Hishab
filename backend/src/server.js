@@ -13,6 +13,7 @@ import forecastRouter from "./routes/forecastRoutes.js";
 import chatRouter from "./routes/chatRoutes.js";
 import aiRouter from "./routes/aiRoutes.js";
 import zakatRouter from "./routes/zakatRoutes.js";
+import { registerGoalAutomationJobs } from "./jobs/goalAutomationJob.js";
 
 const app = express();
 
@@ -46,6 +47,7 @@ app.use((_, res) => {
 });
 
 connectDB().then(() => {
+    registerGoalAutomationJobs();
     app.listen(PORT, () => {
         console.log("Server started on PORT:", PORT);
     });

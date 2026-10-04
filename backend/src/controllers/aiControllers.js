@@ -3,6 +3,7 @@ import Transaction from "../models/Transaction.js";
 import ForecastSnapshot from "../models/ForecastSnapshot.js";
 import Wallet from "../models/Wallet.js";
 import Goal from "../models/Goal.js";
+import GoalTransfer from "../models/GoalTransfer.js";
 import ChatMessage from "../models/ChatMessage.js";
 import {
   COACH_REQUEST_LANGUAGES,
@@ -307,7 +308,7 @@ const buildCoachContext = async (userId) => {
   const userOid = new mongoose.Types.ObjectId(userId);
   const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
 
-  const [totalsAgg, topCats, snapshot, goals, history, notable, activeAlerts] =
+  const [totalsAgg, topCats, snapshot, goals, goalTransfers, walletDoc, history, notable, activeAlerts] =
     await Promise.all([
       // Total income vs expense for this user.
       Transaction.aggregate([
@@ -325,11 +326,19 @@ const buildCoachContext = async (userId) => {
       ForecastSnapshot.findOne({ user: userId })
         .sort({ generatedAt: -1 })
         .lean(),
-      // Active goals only (max 5, no plan internals).
+      // Active automated + plain goals (max 8, compact automation summary).
       Goal.find({ user: userId, status: "active" })
-        .select("title targetAmount savedAmount targetDate")
-        .limit(5)
+        .select("title targetAmount savedAmount targetDate status automation")
+        .sort({ "automation.priority": 1, createdAt: -1 })
+        .limit(8)
         .lean(),
+      // Latest automatic transfers (max 5, compact).
+      GoalTransfer.find({ user: userId })
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .select("type amount cycleKey createdAt")
+        .lean(),
+      Wallet.findOne({ user: userId }).select("balance").lean(),
       // Latest 8 chat messages, oldest first, role + text only.
       ChatMessage.find({ user: userId })
         .sort({ createdAt: -1, _id: -1 })
@@ -403,6 +412,22 @@ const buildCoachContext = async (userId) => {
         g.targetDate instanceof Date
           ? g.targetDate.toISOString().slice(0, 10)
           : String(g.targetDate).slice(0, 10),
+      automationEnabled: Boolean(g.automation?.enabled),
+      automationPaused: Boolean(g.automation?.paused),
+      frequency: g.automation?.frequency || null,
+      percentage: g.automation?.percentage ?? null,
+      priority: g.automation?.priority ?? null,
+      lastProcessedCycle: g.automation?.lastProcessedCycle || null,
+    })),
+    walletBalance: walletDoc ? Number(walletDoc.balance) || 0 : 0,
+    latestGoalTransfers: (goalTransfers || []).map((t) => ({
+      type: t.type,
+      amount: Number(t.amount) || 0,
+      cycleKey: t.cycleKey,
+      date:
+        t.createdAt instanceof Date
+          ? t.createdAt.toISOString().slice(0, 10)
+          : String(t.createdAt || "").slice(0, 10),
     })),
     history: history
       .reverse()
@@ -535,7 +560,7 @@ const buildNoDataCoach = (requestedLanguage, message) => {
 export const askCoach = async (req, res) => {
   try {
     const userId = req.user.userId;
-    const { message: rawMessage, language: rawLanguage } = req.body ?? {};
+    const { message: rawMessage, language: rawLanguage, idempotencyKey: rawKey } = req.body ?? {};
 
     if (typeof rawMessage !== "string" || !rawMessage.trim()) {
       return res.status(400).json({
@@ -560,6 +585,128 @@ export const askCoach = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Language must be one of: auto, bn, en.",
+      });
+    }
+
+    // Goal delete via chat: deterministic, JWT-scoped, confirmation-gated.
+    // Handled before any LLM call — the model never picks IDs or moves money.
+    // "Delete my X goal" proposes; "Yes, delete X" executes via the shared
+    // executeGoalDeletion service. Ambiguous/no-match never deletes.
+    try {
+      const { handleCoachGoalDeleteMessage } = await import("./aiGoalControllers.js");
+      const goalAction = await handleCoachGoalDeleteMessage({ userId, message, language });
+      if (goalAction?.handled) {
+        if (goalAction.deleted) {
+          return res.status(200).json({
+            success: true,
+            goalAction: {
+              kind: goalAction.action,
+              goalTitle: goalAction.goalTitle,
+              refundedAmount: goalAction.refundedAmount,
+            },
+            coach: {
+              language: language === "bn" ? "bn" : language === "en" ? "en" : "mixed",
+              headline: goalAction.goalTitle ? `Goal deleted: ${goalAction.goalTitle}` : "Goal action",
+              answer: goalAction.reply,
+              actions: [],
+              tone: "neutral",
+              disclaimer:
+                language === "bn"
+                  ? "এটি আপনার লেনদেনের ভিত্তিতে একটি আনুমানিক ব্যাখ্যা, আর্থিক পরামর্শ নয়।"
+                  : "This is an estimate based on past transactions, not financial advice.",
+            },
+          });
+        }
+        return res.status(200).json({
+          success: true,
+          goalAction: {
+            kind: goalAction.action,
+            goal: goalAction.goal,
+            matches: goalAction.matches,
+          },
+          coach: {
+            language: language === "bn" ? "bn" : language === "en" ? "en" : "mixed",
+            headline: "Confirm goal deletion",
+            answer: goalAction.reply,
+            actions: [],
+            tone: "caution",
+            disclaimer:
+              language === "bn"
+                ? "এটি আপনার লেনদেনের ভিত্তিতে একটি আনুমানিক ব্যাখ্যা, আর্থিক পরামর্শ নয়।"
+                : "This is an estimate based on past transactions, not financial advice.",
+          },
+        });
+      }
+    } catch (goalErr) {
+      console.error("Coach goal-action failed:", goalErr?.message || goalErr);
+      return res.status(500).json({
+        success: false,
+        message: "Could not process the goal request. No money was moved. Please try again.",
+      });
+    }
+
+    // Goal add-money via chat: deterministic, JWT-scoped, direct execution
+    // for explicit goal + amount. Handled before any LLM call — the model
+    // never picks IDs or moves money. Ambiguous/no-match/failed conditions
+    // never move money.
+    try {
+      const { handleCoachGoalAddMoneyMessage } = await import("./aiGoalControllers.js");
+      const addMoney = await handleCoachGoalAddMoneyMessage({
+        userId,
+        message,
+        language,
+        idempotencyKey: typeof rawKey === "string" ? rawKey : undefined,
+      });
+      if (addMoney?.handled) {
+        if (addMoney.added) {
+          return res.status(200).json({
+            success: true,
+            addMoneyAction: {
+              kind: addMoney.action,
+              goalTitle: addMoney.goalTitle,
+              amount: addMoney.amount,
+              completed: addMoney.completed,
+            },
+            coach: {
+              language: language === "bn" ? "bn" : language === "en" ? "en" : "mixed",
+              headline: addMoney.goalTitle ? `Added to ${addMoney.goalTitle}` : "Goal action",
+              answer: addMoney.reply,
+              actions: [],
+              tone: "neutral",
+              disclaimer:
+                language === "bn"
+                  ? "এটি আপনার লেনদেনের ভিত্তিতে একটি আনুমানিক ব্যাখ্যা, আর্থিক পরামর্শ নয়।"
+                  : "This is an estimate based on past transactions, not financial advice.",
+            },
+          });
+        }
+        return res.status(200).json({
+          success: true,
+          addMoneyAction: {
+            kind: addMoney.action,
+            goal: addMoney.goal,
+            matches: addMoney.matches,
+            amount: addMoney.amount,
+            conditionThreshold: addMoney.conditionThreshold,
+          },
+          coach: {
+            language: language === "bn" ? "bn" : language === "en" ? "en" : "mixed",
+            headline: "Add money to goal",
+            answer: addMoney.reply,
+            actions: [],
+            tone: "caution",
+            disclaimer:
+              language === "bn"
+                ? "এটি আপনার লেনদেনের ভিত্তিতে একটি আনুমানিক ব্যাখ্যা, আর্থিক পরামর্শ নয়।"
+                : "This is an estimate based on past transactions, not financial advice.",
+          },
+        });
+      }
+    } catch (addErr) {
+      console.error("Coach add-money failed:", addErr?.message || addErr);
+      return res.status(500).json({
+        success: false,
+        message: "Could not process the goal request. No money was moved. Please try again.",
       });
     }
 

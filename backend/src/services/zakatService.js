@@ -5,12 +5,16 @@
  *   goldValue      = goldGrams  × goldBdtPerGram
  *   silverValue    = silverGrams × silverBdtPerGram
  *   gross          = cash + gold + silver + business(BDT) + foreign(BDT)
- *   eligibleBase   = max(0, gross - interestExcluded)
- *   net            = max(0, eligibleBase - liabilities)
+ *                    + pension(BDT, only what the user chooses to include)
+ *   net            = max(0, gross - liabilities)
  *   goldNisab      = 87.48  × goldBdtPerGram
  *   silverNisab    = 612.36 × silverBdtPerGram
  *   eligible       = yearCompleted === true && net >= selectedNisab
  *   zakat          = eligible ? net × 0.025 : 0
+ *
+ * Stateless: pensionBdt is request-scoped only. It is never written to
+ * MongoDB, never logged, and never cached — it lives and dies inside one
+ * request/response cycle, exactly like every other Zakat input.
  */
 
 export const GOLD_NISAB_GRAMS = 87.48;
@@ -23,7 +27,7 @@ export const ZAKAT_YEAR_TYPES = ["hijri", "gregorian"];
 export const NISAB_BASES = ["gold", "silver"];
 
 export const ZAKAT_DISCLAIMER =
-  "This is an estimate based on the values you entered and available market/reference data. Consult a qualified scholar for personal religious guidance.";
+  "This is an estimate based on values you entered and available market/reference data. Whether a specific pension balance should be included may depend on personal circumstances; consult a qualified scholar for personal religious guidance.";
 
 const isValidAmount = (v) =>
   typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= MAX_INPUT_VALUE;
@@ -71,11 +75,9 @@ export const validateZakatInput = (body) => {
     "deductibleLiabilitiesBdt",
     errors
   );
-  const interestAmountToExcludeBdt = checkAmount(
-    body.interestAmountToExcludeBdt,
-    "interestAmountToExcludeBdt",
-    errors
-  );
+  // Temporary optional field: pension funds the user chooses to include.
+  // Request-scoped only — never persisted, never logged.
+  const pensionBdt = checkAmount(body.pensionBdt, "pensionBdt", errors);
 
   // Business amount: optional { amount, currency }. Defaults to 0 BDT.
   let businessAmount = 0;
@@ -129,7 +131,7 @@ export const validateZakatInput = (body) => {
       businessCurrency,
       foreignAssets,
       deductibleLiabilitiesBdt,
-      interestAmountToExcludeBdt,
+      pensionBdt,
     },
   };
 };
@@ -146,15 +148,16 @@ export const calculateZakat = (input, market) => {
   const silverValueBdt = input.silverGrams * market.silverBdtPerGram;
 
   const grossZakatableAssetsBdt =
-    input.cashBdt + goldValueBdt + silverValueBdt + input.businessBdt + input.foreignAssetsBdt;
+    input.cashBdt +
+    goldValueBdt +
+    silverValueBdt +
+    input.businessBdt +
+    input.foreignAssetsBdt +
+    input.pensionBdt;
 
-  const eligibleAssetsBeforeLiabilities = Math.max(
-    0,
-    grossZakatableAssetsBdt - input.interestAmountToExcludeBdt
-  );
   const netZakatableWealthBdt = Math.max(
     0,
-    eligibleAssetsBeforeLiabilities - input.deductibleLiabilitiesBdt
+    grossZakatableAssetsBdt - input.deductibleLiabilitiesBdt
   );
 
   const goldNisabBdt = GOLD_NISAB_GRAMS * market.goldBdtPerGram;
@@ -171,8 +174,8 @@ export const calculateZakat = (input, market) => {
     silverValueBdt: round2(silverValueBdt),
     businessValueBdt: round2(input.businessBdt),
     foreignAssetsBdt: round2(input.foreignAssetsBdt),
+    pensionBdt: round2(input.pensionBdt),
     grossZakatableAssetsBdt: round2(grossZakatableAssetsBdt),
-    interestExcludedBdt: round2(input.interestAmountToExcludeBdt),
     deductibleLiabilitiesBdt: round2(input.deductibleLiabilitiesBdt),
     netZakatableWealthBdt: round2(netZakatableWealthBdt),
     selectedNisabBdt: round2(selectedNisabBdt),
