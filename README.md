@@ -52,7 +52,20 @@ Hishab takes a user's own transaction data and turns it into:
 
 ## Demo Flow for Judges
 
-1. **Register / login** with name, phone, and PIN, then open the Dashboard.
+Ready-made demo accounts (dummy data for testing only — all use PIN `123456`):
+
+| # | Phone | PIN |
+| - | ----- | --- |
+| 1 | 01800000000 | 123456 |
+| 2 | 01600000000 | 123456 |
+| 3 | 01500000000 | 123456 |
+| 4 | 01700000000 | 123456 |
+| 5 | 01900000000 | 123456 |
+| 6 | 01400000000 | 123456 |
+
+If any account fails to log in (e.g. fresh database), register a new account on the Register page in under a minute.
+
+1. **Login** with one of the demo accounts above, then open the Dashboard.
 2. **Add wallet money and a few transactions** (salary income plus food and transport expenses across different dates — forecasts need several weeks of history for the full ML path).
 3. **View Dashboard and Analytics** for totals, categories, and trends.
 4. **Open AI Assistant, generate insights, and ask a Bangla/Banglish question**, e.g. “Ei mashe amar khoroch kothay beshi?”
