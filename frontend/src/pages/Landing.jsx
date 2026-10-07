@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router";
+import WhyHishab from "@/components/experiment/WhyHishab";
+import ExperimentResultsCard from "@/components/experiment/ExperimentResultsCard";
 import {
   ArrowRight,
   BellRing,
@@ -21,6 +23,7 @@ const NAV_LINKS = [
   { href: "#features", label: "Features" },
   { href: "#how-it-works", label: "How it works" },
   { href: "#ai-coach", label: "AI Coach" },
+  { href: "#why-hishab", label: "Why Hishab?" },
 ];
 
 const FEATURES = [
@@ -468,6 +471,35 @@ export default function Landing() {
                 </p>
               </div>
             </div>
+          </div>
+        </section>
+
+        {/* Why Hishab? */}
+        <section
+          id="why-hishab"
+          className="mx-auto w-full max-w-6xl scroll-mt-20 px-4 py-14 sm:px-6 lg:py-20"
+          aria-labelledby="why-heading"
+        >
+          <p className="text-xs font-bold tracking-widest text-[#0756A6] uppercase">
+            Why Hishab?
+          </p>
+          <h2
+            id="why-heading"
+            className="font-heading mt-2 max-w-2xl text-2xl font-extrabold text-[#064581] sm:text-3xl"
+          >
+            History shows the past. Hishab protects next month.
+          </h2>
+          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[#3d4f63] sm:text-base">
+            A standard dashboard leaves you to decide alone, and a fixed
+            percentage rule can push savings even when a shortfall is coming.
+            Hishab forecasts, explains in your language, checks safety first,
+            and only moves savings with your explicit confirmation.
+          </p>
+          <div className="mt-8">
+            <WhyHishab />
+          </div>
+          <div className="mt-6">
+            <ExperimentResultsCard />
           </div>
         </section>
 

@@ -14,6 +14,8 @@ import forecastRouter from "./routes/forecastRoutes.js";
 import chatRouter from "./routes/chatRoutes.js";
 import aiRouter from "./routes/aiRoutes.js";
 import zakatRouter from "./routes/zakatRoutes.js";
+import shortfallRouter from "./routes/shortfallRoutes.js";
+import experimentRouter from "./routes/experimentRoutes.js";
 import { registerGoalAutomationJobs } from "./jobs/goalAutomationJob.js";
 
 const app = express();
@@ -43,6 +45,8 @@ app.use("/api/forecasts", forecastRouter);
 app.use("/api/chat", chatRouter);
 app.use("/api/ai", aiRouter);
 app.use("/api/zakat", zakatRouter);
+app.use("/api/shortfall", shortfallRouter);
+app.use("/api/experiments", experimentRouter);
 
 app.use((_, res) => {
   res.status(404).json({

@@ -13,18 +13,41 @@ Hishab turns raw transaction history into clear spending insight, 4-week cash-fl
 
 ## Problem Statement
 
-Bangladesh MFS users generate plenty of transactions and wallet balances, but those numbers rarely turn into understanding. Most users cannot answer simple questions: *Where did my money go this month? Will I run short next month? Am I actually saving enough?* Existing tools are usually English-only, offer no forward-looking guidance, and give no friendly way to build savings discipline. Hishab closes that gap with understandable cash-flow insight, savings guidance, and Bangla-friendly financial support built around the wallet users already have.
+User:
+Bangladesh MFS users with irregular or tight monthly cash flow.
+
+Problem:
+They often discover a cash-flow shortfall only after spending has already happened.
+
+Consequence:
+This can force delayed bills, reduced savings, or unplanned borrowing.
+
+Measurable metric:
+Percentage of completed user-months where recorded expenses exceed recorded income.
+
+Intervention:
+A multilingual Shortfall Prevention Plan based on the user's own transaction history.
+
+Success criterion:
+A lower observed cash-flow-shortfall rate after accepted plans, reported only with sufficient longitudinal evidence and never claimed as causal without a controlled study.
+
+Operational definition (used verbatim in code, UI, reports, seed data):
+Historical cash-flow shortfall month = a completed calendar month where total recorded expenses exceed total recorded income. Call this "cash-flow shortfall," not "negative wallet balance," unless a verified month-start wallet balance and full wallet ledger make actual balance reconstruction possible. A forecasted shortfall = projected four-week expenses exceed projected four-week income, or the existing cumulative predicted balance becomes negative when a reliable current wallet balance is available.
+
+Details: `PRODUCT_OUTCOME_REPORT.md` (methodology, synthetic demo baseline, funnel, research status, limits) and `docs/JUDGE_DEMO_SCRIPT_60S.md` (60-second demo). Research package: `docs/USER_RESEARCH_PROTOCOL.md`, `docs/INTERVIEW_GUIDE_BN_EN.md`, `docs/RESEARCH_CONSENT.md`, `docs/USER_RESEARCH_RESULTS_TEMPLATE.md`. Status: user interviews pending — no qualitative claims are made yet. All demo numbers are labelled synthetic; real-user metrics stay empty/pending until consented study data exists.
 
 ## Solution Overview
 
 Hishab takes a user's own transaction data and turns it into:
 
-- **Spending analytics** — totals, top categories, weekly history, and dashboard views.
-- **4-week forecast** — predicted income/expense per week with a weekly shortfall risk.
-- **Unusual-expense detection** — IsolationForest on real data, IQR rule on small data, always labelled with the method used.
-- **Smart alerts** — deduplicated future-shortfall and unusual-spending notifications.
-- **Zakat calculation** — deterministic 2.5% math on nisab rules with labelled live-or-reference market data.
-- **Savings goals** — manual contributions plus priority-based weekly/monthly automation.
+- **Shortfall Prevention Plan (core intervention)** — detects upcoming shortfall risk, explains the top driver from the user's own transactions, gives at most one concrete action, and records useful / not-useful / completed with Bangla / English / Banglish (`GET /api/shortfall/plan`, `ShortfallPlanCard` first card on Forecast + AI Assistant).
+- **Shortfall progress tracking (primary outcome)** — transaction-derived baseline shortfall rate over completed months only, forecasted risk, and observational pre/post comparison (`GET /api/shortfall/outcome`, `ShortfallProgressCard`). Current partial month never counts; thin history shows "insufficient history".
+- **Spending analytics (supportive)** — totals, top categories, weekly history, and dashboard views.
+- **4-week forecast (supportive: risk detector)** — predicted income/expense per week with a weekly shortfall risk.
+- **Unusual-expense detection (supportive)** — IsolationForest on real data, IQR rule on small data, always labelled with the method used; flags an unusual expense that may contribute to a possible shortfall.
+- **Smart alerts (supportive)** — deduplicated future-shortfall and unusual-spending notifications.
+- **Zakat calculation (separate utility, not part of the primary success metric)** — deterministic 2.5% math on nisab rules with labelled live-or-reference market data.
+- **Savings goals (supportive: help only after immediate shortfall risk is understood)** — manual contributions plus priority-based weekly/monthly automation.
 - **Bilingual AI coaching** — Bangla / English / mixed explanations grounded only in the user's own data.
 - **Safe goal actions** — chat can add savings (with wallet-balance conditions) and delete goals (with explicit confirmation) through deterministic, auditable backend services. The LLM never touches money.
 
@@ -319,6 +342,16 @@ Backend tests spin up an in-memory MongoDB replica set via `mongodb-memory-serve
 - **Where to look.** Forecast page and AI Assistant show an “Evaluation & reliability” card (train/test dates, trend-vs-average table, not-enough-data state, salary/festival state, expandable “How this was checked”). Full computed numbers: `EVALUATION_REPORT.md` (regenerate with `ai-service/tests/generate_eval_report.py`).
 - **Privacy & safety.** Groq receives aggregates only — never raw transactions, labels, or PII. Money movement is unchanged (deterministic backend services; the LLM never moves money).
 - **Fixture ≠ production accuracy.** All reported numbers come from small, clean synthetic fixtures. They validate methodology and guard regressions; they do not prove real-world accuracy. Real-world validation needs labelled user data collected over time. `EVALUATION_REPORT.md` states this explicitly alongside the measured values.
+
+## Differentiation & Impact Validation (judge-ready)
+
+**Primary hypothesis:** Compared with a standard transaction dashboard or rule-based savings planner, Hishab's combined workflow (forecast → personalized Bangla/Banglish coaching → one shortfall-prevention action → explicit goal contribution confirmation) improves savings adherence, reduces cash-flow shortfall events, or improves goal completion.
+
+- **Comparison arms** (`GET /api/experiments/arms`, `ARMS` in `backend/src/services/experimentService.js`): **Control** (transaction list + totals + category chart; no forecast, coach, alert, or recommendation) vs **Rule-Based planner** (dashboard + fixed “save 10%” rule + manual contributions; no forecast prioritization, coaching, or shortfall prevention) vs **Hishab Combined Workflow** (4-week forecast + shortfall/surplus detection + Bangla/English/Banglish explanation + one prioritized action + forecast-gated goal suggestion + explicit confirmation + feedback capture). No real commercial competitor is named or measured — only generic categories.
+- **Metrics** (denominator-explicit envelopes: numerator, denominator, sample count, date range, eligibility, limitation): `savingsAdherenceRate = actualSavingsBDT / plannedSavingsBDT` (no-plan → null, never 100%); `shortfallEventRate = shortfallMonths / completedObservedMonths` (observed vs forecasted kept separate); `goalCompletionRate = completedGoals / eligibleGoals` (on-time tracked separately; new goals excluded). Workflow funnel: `forecast_viewed → shortfall_plan_shown → coach_language_used → coach_action_accepted/dismissed → goal_suggestion_shown → goal_contribution_proposed → goal_contribution_confirmed → goal_contribution_completed → feedback_useful/not_useful` (`POST /api/experiments/events`, allowlist-sanitized metadata only).
+- **Synthetic-data boundary:** deterministic simulation over 9 version-controlled scripted fixtures (`synthetic_demo_only`) validates workflow logic only — safety gate (shortfall → defer, surplus → capped suggestion), confirmation-before-completion, metric math. Results: adherence null / 0.333 / 1.0; shortfall 0.5 all arms (identical by construction); goal completion 0.333 all arms; unsafe suggestions rule-based 0.333 vs Hishab 0; overall status `insufficient_evidence`, no winner. Reproduce: `node scripts/run-synthetic-experiment.mjs` (from `backend/`). Full numbers + pilot protocol: `DIFFERENTIATION_AND_IMPACT_REPORT.md`.
+- **Real-user pilot plan:** balanced assignment to the three arms, explicit consent, 2–3 monthly cycles, predefined primary metric (adherence or shortfall-event rate), ≥10 users per arm with ≥2 completed months each, attrition tracking, no causal claim until thresholds are met (`GET /api/experiments/outcomes` returns `insufficient_evidence` below them).
+- **UI:** “Why Hishab?” comparison + workflow visual + “Synthetic workflow validation” results card on the landing page.
 
 ## Limitations and Roadmap
 

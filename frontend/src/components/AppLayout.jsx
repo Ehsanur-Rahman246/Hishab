@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { useCurrentUser, useLogout } from "@/hooks/useAuth";
 import { useAlerts } from "@/hooks/useAlerts";
+import { BalancePrivacyToggle } from "@/components/dashboard/BalancePrivacyToggle";
 import { cn } from "@/lib/utils";
 
 // Sidebar order and icons follow the design.
@@ -356,6 +357,7 @@ export default function AppLayout() {
           </div>
 
           <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+            {onDashboard ? <BalancePrivacyToggle /> : null}
             <Link
               to="/ai-assistant"
               className="hidden items-center gap-2 rounded-full border border-[#ffd21f]/70 bg-[#fff6cc] px-4 py-2 text-sm font-semibold text-[#064581] hover:bg-[#fff0b0] lg:inline-flex"

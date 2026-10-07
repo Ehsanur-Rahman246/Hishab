@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { AiInsightsPanel } from "@/components/dashboard/AiInsightsPanel";
+import { ShortfallProgressCard } from "@/components/shortfall/ShortfallProgressCard";
 import { SpendingTrendCard } from "@/components/dashboard/SpendingTrendCard";
 import { CategoryBreakdownCard } from "@/components/dashboard/CategoryBreakdownCard";
 import { useDashboardData } from "@/hooks/useDashboard";
@@ -51,6 +52,9 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8">
+      {/* Primary outcome first: shortfall prevention progress. */}
+      <ShortfallProgressCard />
+
       <section aria-label="Key figures" className="grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Total Balance"

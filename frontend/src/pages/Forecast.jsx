@@ -29,6 +29,9 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EvaluationSection } from "@/components/ai/EvaluationSection";
+import { ShortfallProgressCard } from "@/components/shortfall/ShortfallProgressCard";
+import { ShortfallPlanCard } from "@/components/shortfall/ShortfallPlanCard";
+import { FeedbackPriorityReport } from "@/components/shortfall/FeedbackPriorityReport";
 import { useForecasts } from "@/hooks/useForecasts";
 import { useGoals } from "@/hooks/useGoals";
 import { toApiError, useGenerateInsights } from "@/hooks/useAiInsights";
@@ -455,9 +458,9 @@ function GoalCard({ goalsQuery, avgNet }) {
     : 0;
 
   return (
-    <Card className="shadow-panel [--card-spacing:--spacing(5)]">
+    <Card className="shadow-panel [--card-spacing:--spacing(5)] opacity-95">
       <div className="flex items-center justify-between px-(--card-spacing)">
-        <h2 className="text-lg">Savings goal</h2>
+        <h2 className="text-lg">Savings goal <span className="text-xs font-normal text-muted-foreground">(supportive — after shortfall risk is understood)</span></h2>
         {goal ? (
           <span className="max-w-[55%] truncate text-xs text-muted-foreground">
             {goal.title}
@@ -643,6 +646,10 @@ export default function Forecast() {
         </Card>
       ) : (
         <>
+          {/* Primary outcome first: progress + one-step prevention plan. */}
+          <ShortfallProgressCard />
+          <ShortfallPlanCard />
+
           <section aria-label="Forecast totals" className="grid gap-6 md:grid-cols-3">
             <StatTile
               label="Predicted expenses"
@@ -679,6 +686,7 @@ export default function Forecast() {
             evaluation={snapshot.evaluation ?? null}
             patternSignals={snapshot.patternSignals ?? null}
           />
+          <FeedbackPriorityReport />
         </>
       )}
     </div>
