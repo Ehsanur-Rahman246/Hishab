@@ -122,6 +122,42 @@ This is the core promise to users and judges: **the LLM never moves money.**
 - **Honest AI boundaries.** The coach answers from supplied aggregates only, caps replies (3 actions max), and always disclaims estimates. It gives no investment, credit, lending, tax, legal, or religious rulings — Zakat help is general-concept only plus the deterministic calculator.
 - **Privacy-safe provider context.** Groq receives aggregates (totals, categories, forecast, goals, recent messages, active alerts). Raw transactions, emails, phones, passwords, and secrets never cross the provider boundary, and chat history stores message texts only.
 
+## Privacy & Data Governance
+
+Stored: transaction records, wallet/goal records, forecast snapshots, alerts, chat messages, goal-transfer audit records (`backend/src/models/`).
+
+Sent to the external LLM: aggregated and minimised financial context only — totals, top categories, forecast weeks, goals, wallet balance, recent chat texts, active alerts (`buildCoachContext` in `backend/src/controllers/aiControllers.js`).
+
+Never leaves the backend: raw transactions, phone numbers, passwords/PINs, JWTs, wallet numbers, API keys and secrets. The provider key stays server-side; chat history stores message texts only. Asserted by `backend/tests/privacyBoundaries.test.js`.
+
+Retention (configurable via `CHAT_RETENTION_DAYS` / `FORECAST_RETENTION_DAYS` / `ALERT_RETENTION_DAYS`, defaults 90/180/90): chat messages expire after ~90 days; forecast snapshots after ~180 days (each user's latest snapshot is always kept); read+resolved alerts after ~90 days (unread/actionable alerts survive). Goal-transfer audit rows and transactions are immutable and are never deleted by cleanup — money-movement integrity depends on them (`retentionService.js`, `retention.test.js`).
+
+Deletion/export limitations: no self-serve export API exists. Clear-chat deletes messages; PIN-confirmed Delete-account removes profile rows (goal-transfer orphans remain as audit evidence). No encryption-at-rest, anonymisation pipeline, deletion-rights workflow, compliance certification, or legal-compliance claim is made — none is implemented.
+
+Synthetic-data statement: all demo accounts, screenshots, seed data, fixtures, and evaluation numbers in this repo are synthetic. They do not represent real customers or real financial behavior.
+
+In-app notice: the AI Assistant shows a concise Trust & Safety section with the same boundaries.
+
+## Threat Model and Security Controls
+
+Attacker: any authenticated user typing into chat (untrusted data). Goals: override system rules (“ignore previous rules”), reveal hidden prompt/API keys/private context/another user's data, fabricate balances/transactions/forecasts/goals, smuggle instructions inside benign text.
+
+Controls: strict system instruction ordering the model to ignore embedded instructions; user message labelled “untrusted text” and answered only from the trusted summary (`buildCoachPrompt`); JSON-schema validation; numerical-grounding replacement guard; JWT user scoping on every query; deterministic money services only — the LLM can never invoke a transfer (chat proposes a read-only token; only explicit confirm-token moves money). Tested by `coachPromptInjection.test.js` (BN/EN/Banglish), `coachNumberGuardHardening.test.js`, `goalActionAuth.test.js`. Full model in `backend/src/services/promptInjectionGuard.js`.
+
+CSRF design: HMAC-signed double-submit tokens (`exp.rand.sig`). `GET /api/auth/csrf-token` mints the token as an `XSRF-TOKEN` cookie + JSON; mutating cookie-authenticated routes require an identical `x-csrf-token` header with valid signature and unexpired timestamp. Rejects missing/invalid/cross-user/expired with 403. Exempt only: safe methods and session-establishing auth endpoints (login/register/token-mint). SameSite (lax dev / none+secure prod) is defence-in-depth only; CORS uses an explicit allowlist with no wildcard credentials (`backend/src/middleware/csrf.js`, `server.js`, `csrf.test.js`).
+
+Retention policy: see Privacy section above. Cleanup (`cleanupRetention`) deletes only expired non-financial copies, keeps each user's latest forecast, and never touches `GoalTransfer`/`Transaction`.
+
+## Segment, Fairness, Confidence, Calibration, Human Review
+
+Segments (non-sensitive usage patterns only): history length (4–7 / 8–15 / 16+ weeks), income regularity (recurring salary-like vs irregular), spending pattern (stable vs volatile), transaction density (low/medium/high). Protected attributes are forbidden keys and never inferred; reports carry segment labels + numbers + sample counts only, with null / “not enough evidence” below 4 samples (`ai-service/segments.py`, `tests/test_segments.py`). These checks measure performance consistency across usage patterns, not demographic fairness.
+
+Forecast: MAE/RMSE by segment for income and expense. Anomalies: precision/recall/F1/false-positive rate by segment. See `EVALUATION_REPORT.md` §§10–12 and `RESPONSIBLE_AI_AND_SECURITY_REPORT.md` §§2–4 for computed values.
+
+Confidence (observable evidence only — history weeks, holdout error, stability, salary/festival evidence): `high | medium | low` plus reasons (`ai-service/confidence.py`). Tolerance band = max(BDT 500, 20% of mean weekly expense); calibration reports per-bucket coverage and claims “calibrated” only when high > medium > low strictly — otherwise it states not calibrated.
+
+Human-review and fallback: low confidence/insufficient data → labelled historical-average fallback + “Review manually”, no recommendation; uncertain anomalies → “review this expense” (never fraud); shortfall/repeated false positives → review action, never auto-transfer; provider/model failure → fallback or unavailable state. No model output can transfer, modify a goal, or make irreversible financial decisions. UI shows confidence, data quality, fallback reason, segment, and Confirm/Cancel on every proposal.
+
 ## Folder Structure
 
 ```text
@@ -150,10 +186,15 @@ Hishab/
 │   ├── AI_INTEGRATION.md     # backend ↔ FastAPI contract and coach details
 │   └── GOAL_AUTOMATION.md    # automation rules, API, and test scenarios
 ├── ai-service/               # FastAPI ML microservice (port 8000)
-│   ├── main.py               # GET /health, POST /analyze-transactions
-│   ├── ml_service.py         # forecast, anomaly detection, risk rules
-│   ├── requirements.txt      # FastAPI, Pandas, Scikit-learn, ...
+│   ├── main.py               # GET /health, POST /analyze-transactions (+ optional festivalDates)
+│   ├── ml_service.py         # forecast, contextual anomalies, risk, evaluation + signals
+│   ├── evaluation.py         # leakage-safe expanding-window temporal evaluation (MAE/RMSE/sMAPE)
+│   ├── patterns.py           # salary-cycle + Bangladesh festival signals (Asia/Dhaka)
+│   ├── requirements.txt      # Python dependencies
 │   └── tests/                # fixtures + test_ml_service.py (no pytest needed)
+│       ├── test_evaluation.py, test_patterns.py, test_anomalies_context.py
+│       └── generate_eval_report.py  # regenerates EVALUATION_REPORT.md
+├── EVALUATION_REPORT.md      # computed fixture metrics, date ranges, limits (no invented claims)
 └── README.md                 # this file
 ```
 
@@ -227,6 +268,9 @@ Only names from the shipped `.env.example` files are listed. Copy each example t
 | `FX_FALLBACK_API_BASE_URL` | Optional second FX provider before reference values |
 | `FX_FALLBACK_API_KEY` | Key sent as `apikey` to the fallback FX provider |
 | `GOAL_AUTOMATION_DISABLED` | Set to `1` to disable the cron scheduler |
+| `CHAT_RETENTION_DAYS` | Chat-message retention days for cleanup (default `90`) |
+| `FORECAST_RETENTION_DAYS` | Forecast-snapshot retention days; latest per user always kept (default `180`) |
+| `ALERT_RETENTION_DAYS` | Read+resolved alert retention days (default `90`) |
 
 **AI service (`ai-service/.env.example`)**
 
@@ -246,12 +290,35 @@ Only names from the shipped `.env.example` files are listed. Copy each example t
 
 | Suite | Command (from the service folder) | Coverage |
 | ----- | --------------------------------- | -------- |
-| Backend | `npm test` (`node --test tests/*.test.js`) | Goal deletion refund (zero-balance, funded, retry/concurrency, release-vs-delete race, cross-user block); AI add-money (exact + conditional success, threshold/insufficient failures, ambiguous, not-found, inactive, cross-user, idempotent retry); AI action parsing (delete/add-money intents, confirmations, hints, resolution) |
+| Backend | `npm test` (`node --test tests/*.test.js`) | Goal deletion refund (zero-balance, funded, retry/concurrency, release-vs-delete race, cross-user block); AI add-money confirm-first (propose never moves money, token confirm moves once, ambiguous/condition/inactive/cross-user/idempotent paths); AI action parsing; coach numerical grounding (22 BN/EN/Banglish cases + scorer unit checks); number-guard replacement hardening (9 attacks + 3 grounded); prompt-injection suite (BN/EN/Banglish override, reveal, fabricate, embedded); CSRF double-submit (valid/missing/invalid/cross-user/expired/exempt/flags); retention cleanup + immutable-ledger protection; privacy boundaries; snapshot metadata schema |
 | AI service | `python tests/test_ml_service.py` | 23 checks: regression vs fallback selection, forecast weeks, non-negative clipping, risk rules, outlier flagging, income-only and identical-amount edges |
+| AI service eval | `python tests/test_evaluation.py` | 28 checks: expanding-window temporal split, LR-wins vs baseline-wins fixtures, ineligible-data honesty, finite/reproducible/hand-checked MAE-RMSE-sMAPE |
+| Forecast validation | `python tests/test_forecast_validation.py` | 45 checks: transaction-level chronological split, independent OLS/mean recomputation, per-series winners, spy proofs of no holdout leakage, rolling-origin cutoffs |
+| Anomaly validation | `python tests/test_anomaly_validation.py` | 25 checks: independently labelled 38-case fixture, TP/FP/FN + precision/recall/F1, rent-not-flagged, label non-exposure |
+| AI service patterns | `python tests/test_patterns.py` | 18 checks: payday detection, thin/unstable-history fallback, learned festival uplift, no-adjustment reasons, no-leakage, no invented bonus |
+| AI service anomalies | `python tests/test_anomalies_context.py` | 16 checks: recurring rent spared, Food outlier flagged, novel merchant flagged, sparse fallback, income-only no-crash, determinism |
+| AI segments/confidence | `python tests/test_segments.py` | 24 checks: non-sensitive segment classifiers, genuine 12-user segmentEvaluation (fallback rate, FPR, insufficient-evidence nulls, no-PII report), confidence levels, honest calibration buckets, human-review defaults |
+| Eval report | `python tests/generate_eval_report.py` | Regenerates `EVALUATION_REPORT.md` from deterministic fixtures (numbers are computed, never typed) |
+| Responsible-AI report | `python tests/generate_responsible_report.py` | Regenerates `RESPONSIBLE_AI_AND_SECURITY_REPORT.md` (segment metrics, FPR, calibration buckets, controls, limits) |
+| Coach probe (opt-in) | `node scripts/eval-coach-grounding.mjs --live` (backend, needs `GROQ_API_KEY` + `GROQ_MODEL`) | Live Groq numerical-grounding probe on synthetic aggregates; never runs in CI |
 | Frontend | `npm test` (`node --test tests/*.test.js`) | Profile wallet-card privacy (no balance rendered, wallet number kept, other balance UI intact) |
 | Lint / build | `npm run lint`, `npm run build` | ESLint and production Vite build |
 
 Backend tests spin up an in-memory MongoDB replica set via `mongodb-memory-server` (first run downloads a binary), so no local database is needed for tests.
+
+## Model Evaluation & Reliability (judge-ready)
+
+- **Chronological train/test methodology.** No random splitting, ever. Transactions are aggregated into Monday-start weekly buckets exactly as production does (`build_weekly_history`). Training data = earlier weeks only; test data = the later unseen consecutive weeks, with the latest 4 weeks kept as the final untouched holdout forecasting horizon. With enough history, expanding-window rolling-origin evaluation scores every eligible cutoff (train grows week by week); earlier cutoffs are validation folds, the last cutoff is the holdout, and nothing performs model selection or feature tuning on it.
+- **No future transactions enter training.** Raw transactions are sliced at the first holdout Monday: every trend fit, historical-average baseline, salary-pattern search, and festival-uplift estimate receives only transactions dated strictly before the cutoff. Holdout transactions supply scoring targets and nothing else. Spy tests (`test_forecast_validation.py`) record every fitting/feature input and assert the boundary `train max < cutoff <= test min`.
+- **LinearRegression vs historical-average baseline.** The baseline predicts each future week with the mean weekly income/expense computed from training weeks only. Both models are scored per series: income MAE, income RMSE, expense MAE, expense RMSE. MAE = mean |forecast − actual| in BDT (robust average miss); RMSE = √(mean squared miss) in BDT (punishes big misses). Winners are chosen per series (`linear_regression` / `historical_average_baseline` / `tie`); exact ties resolve to `tie`. Returned as the machine-readable `forecastEvaluation` object (`splitStrategy: expanding_window_temporal_holdout`, train/test dates, per-model MAE/RMSE, per-series winners), persisted on `ForecastSnapshot` alongside the legacy `evaluation` block.
+- **Insufficient-data behavior.** Under 8 weekly buckets (4 train + 4 test) the object returns `eligible: false`, an honest reason, and null metrics/winner — accuracy values are never invented.
+- **Anomaly precision/recall on independent labels.** `ai-service/tests/labelled_anomalies_v1.json` (38 cases, 4 known anomalies: large Food spend, rare high-value Shopping, 2-day velocity burst, novel merchant) was labelled by construction rules before any detector ran. The production detector runs on label-stripped transactions; detections are matched to stable `caseId`s. Precision = correct flags / all flags; recall = correct flags / all known anomalies; F1 = their harmonic mean. Measured: TP=4, FP=0, FN=0 → precision/recall/F1 = 1.0. Labels never reach production responses or Groq (asserted by test).
+- **Salary/festival handling.** Payday detection needs ≥3 similar income receipts (within 25% of median) across ≥2 calendar months (Asia/Dhaka dates); otherwise `salaryPatternDetected: false`. Festival uplift uses a maintained Bangladesh calendar (Eid-ul-Fitr, Eid-ul-Adha, Pohela Boishakh, Ramadan/Eid shopping windows, Durga Puja; configurable `festivalDates` override) and learns per-user income/expense multipliers from ≥2 prior festival weeks; otherwise `festivalAdjustmentApplied: false` with a reason. No hard-coded bonus is ever assumed.
+- **Contextual anomaly logic.** Per expense: log amount, amount ÷ user's own category median (≥2× = abnormal), merchant-description novelty, Asia/Dhaka weekday, and 7-day spend velocity vs prior 28-day baseline. 10+ expenses: `IsolationForest(random_state=42)` on these features, keeping only above-median + category-abnormal flags (`contextual_isolation_forest`); fewer: explainable rule fallback (`robust_contextual_fallback`). Every flag keeps the legacy `reason` plus `reasons[]`, `anomalyScore`, `severity`, `detectionMethod`. Routine rent/bills at their own norm are never flagged for amount alone.
+- **Bangla/Banglish numerical grounding.** `backend/tests/coachNumericalGrounding.test.js` (22 cases: totals, net, percentages, categories, forecast + risk, goal progress/remaining, BDT/৳/comma formats, rounding edges, Bengali digits like ১২৫০, Banglish like “amar food e koto khoroch hoise?”, refusal-to-invent) scores fixture replies with `coachNumericalScorer.js` (Bengali-digit normalisation, BDT 1.0 absolute / 0.5% relative tolerance, language routing, hallucination rate). JSON validity is never treated as correctness. Live replies pass `applyNumericGroundingGuard`, which appends an explicit caution when figures are not derivable from context. Live Groq probing is opt-in (`--live`, env-gated); CI is fully offline.
+- **Where to look.** Forecast page and AI Assistant show an “Evaluation & reliability” card (train/test dates, trend-vs-average table, not-enough-data state, salary/festival state, expandable “How this was checked”). Full computed numbers: `EVALUATION_REPORT.md` (regenerate with `ai-service/tests/generate_eval_report.py`).
+- **Privacy & safety.** Groq receives aggregates only — never raw transactions, labels, or PII. Money movement is unchanged (deterministic backend services; the LLM never moves money).
+- **Fixture ≠ production accuracy.** All reported numbers come from small, clean synthetic fixtures. They validate methodology and guard regressions; they do not prove real-world accuracy. Real-world validation needs labelled user data collected over time. `EVALUATION_REPORT.md` states this explicitly alongside the measured values.
 
 ## Limitations and Roadmap
 
@@ -271,6 +338,14 @@ Future roadmap (not yet built): real MFS/bank integrations, push notifications, 
 - **Engagement beyond payments.** Forecasts, alerts, goals, and coaching give users reasons to return daily, not just to transact.
 - **Bangla-first inclusion.** Bangla, English, and Banglish support brings understandable finance to users poorly served by English-only tools.
 - **Safe and auditable savings.** Every taka moved into or out of a goal is atomic, idempotent, and traceable in an immutable ledger — the kind of transparency a financial brand can stand behind.
+
+## Judge Demo Script (3 minutes)
+
+1. **Forecast page → “Evaluation & reliability”.** “We never shuffle weeks. The model trains only on weeks before the test window and is scored on the untouched last 4 weeks — train dates and test dates are shown here.”
+2. **Point at the trend-vs-average table.** “Same test weeks for both. Lower miss wins; ties go to the simple average. On trending data the trend wins; on flat data the average wins — both fixtures are in the report with real numbers.”
+3. **Thin-data honesty.** “With under 8 weeks there is no split and no metrics — the card says why instead of inventing accuracy.”
+4. **Salary/festival signals.** “Payday is learned from your own repeated receipts, or reported absent. Festival uplift learns from your own past festival weeks, or stays off with a reason — we never assume an Eid bonus.”
+5. **AI Assistant → unusual expenses + Bangla question.** “Flags explain themselves (category multiple, new merchant, pace). Ask in Banglish, e.g. ‘amar food e koto khoroch hoise?’ — every figure is checked against your data, and unverifiable numbers get an explicit caution, not silent trust.”
 
 ## Contribution and License
 

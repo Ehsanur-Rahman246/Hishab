@@ -36,6 +36,12 @@ No LLM API — just transparent stats plus two small, explainable ML models.
 | `tests/sample_small.json` | 3 txns / 1 week → proves the average fallback works |
 | `tests/sample_income_only.json` | Income only, one txn without description → proves no-expense path never crashes |
 | `tests/test_ml_service.py` | 23 automated checks, no pytest needed (`python tests/test_ml_service.py`) |
+| `evaluation.py` | Leakage-safe expanding-window temporal evaluation: final 4-week holdout, LR vs historical average, MAE/RMSE/sMAPE (sMAPE 0/0 → 0), `eligible: false` under 8 weeks |
+| `patterns.py` | Salary-cycle (≥3 receipts, 2+ months, Asia/Dhaka) + Bangladesh festival calendar with learned per-user uplift (≥2 prior festival weeks) or honest off-with-reason |
+| `tests/test_evaluation.py` | 28 checks: chronological separation, LR-wins / baseline-wins fixtures, hand-checked metrics, reproducibility |
+| `tests/test_patterns.py` | 18 checks: payday detection, fallbacks, festival uplift, no-leakage, no invented bonus |
+| `tests/test_anomalies_context.py` | 16 checks: rent spared, Food outlier + novel merchant flagged, sparse fallback, income-only safe |
+| `tests/generate_eval_report.py` | Regenerates `../EVALUATION_REPORT.md` from deterministic fixtures |
 
 ## 1. Open PowerShell in this folder
 

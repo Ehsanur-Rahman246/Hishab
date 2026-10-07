@@ -28,6 +28,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { EvaluationSection } from "@/components/ai/EvaluationSection";
 import { useForecasts } from "@/hooks/useForecasts";
 import { useGoals } from "@/hooks/useGoals";
 import { toApiError, useGenerateInsights } from "@/hooks/useAiInsights";
@@ -673,6 +674,11 @@ export default function Forecast() {
               <GoalCard goalsQuery={goalsQuery} avgNet={view.avgNet} />
             </div>
           </div>
+
+          <EvaluationSection
+            evaluation={snapshot.evaluation ?? null}
+            patternSignals={snapshot.patternSignals ?? null}
+          />
         </>
       )}
     </div>

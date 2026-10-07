@@ -7,9 +7,13 @@ import {
   register,
 } from "../controllers/authControllers.js";
 import authMiddleware from "../middleware/authMiddleware.js";
+import { issueCsrfToken } from "../middleware/csrf.js";
 import { loginRateLimit, authRateLimit } from "../middleware/rateLimit.js";
 
 const authRouter = express.Router();
+
+// Double-submit CSRF token mint (safe method, exempt from CSRF itself).
+authRouter.get("/csrf-token", issueCsrfToken);
 
 authRouter.post("/register", authRateLimit, register);
 authRouter.post("/login", loginRateLimit, login);

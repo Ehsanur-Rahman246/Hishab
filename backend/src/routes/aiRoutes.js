@@ -6,8 +6,11 @@ import {
   getLatestInsights,
 } from "../controllers/aiControllers.js";
 import {
+  cancelGoalAddMoneyToken,
   confirmGoalAddMoney,
+  confirmGoalAddMoneyToken,
   confirmGoalDelete,
+  proposeGoalAddMoney,
   requestGoalDelete,
 } from "../controllers/aiGoalControllers.js";
 import authMiddleware from "../middleware/authMiddleware.js";
@@ -38,5 +41,11 @@ aiRouter.post("/goals/delete-confirm", authMiddleware, coachRateLimit, confirmGo
 // Chat add-money: explicit goal choice for an ambiguous command.
 // All checks + money movement run server-side via executeManualContribution.
 aiRouter.post("/goals/add-money-confirm", authMiddleware, coachRateLimit, confirmGoalAddMoney);
+
+// Confirm-first token flow: propose is read-only; confirm-token moves money
+// once (user-bound, action-bound, short-lived, one-time-use, server-validated).
+aiRouter.post("/goals/add-money-propose", authMiddleware, coachRateLimit, proposeGoalAddMoney);
+aiRouter.post("/goals/add-money-confirm-token", authMiddleware, coachRateLimit, confirmGoalAddMoneyToken);
+aiRouter.post("/goals/add-money-cancel-token", authMiddleware, coachRateLimit, cancelGoalAddMoneyToken);
 
 export default aiRouter;

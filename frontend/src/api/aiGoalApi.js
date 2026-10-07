@@ -15,3 +15,15 @@ export const confirmGoalAddMoney = ({ goalId, amount, conditionThreshold, idempo
   api
     .post("/api/ai/goals/add-money-confirm", { goalId, amount, conditionThreshold, idempotencyKey, language })
     .then((r) => r.data);
+
+// Confirm-first token flow: propose is read-only (goal, amount, wallet
+// impact + short-lived confirmation token); confirm-token moves money once;
+// cancel-token discards the proposal. The chat never moves money directly.
+export const proposeGoalAddMoney = ({ goalId, amount, conditionThreshold }) =>
+  api.post("/api/ai/goals/add-money-propose", { goalId, amount, conditionThreshold }).then((r) => r.data);
+
+export const confirmGoalAddMoneyToken = ({ confirmationToken, idempotencyKey, language }) =>
+  api.post("/api/ai/goals/add-money-confirm-token", { confirmationToken, idempotencyKey, language }).then((r) => r.data);
+
+export const cancelGoalAddMoneyToken = ({ confirmationToken }) =>
+  api.post("/api/ai/goals/add-money-cancel-token", { confirmationToken }).then((r) => r.data);

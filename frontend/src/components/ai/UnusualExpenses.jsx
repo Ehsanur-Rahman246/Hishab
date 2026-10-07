@@ -39,8 +39,19 @@ export function UnusualExpenses({ items }) {
                       {u.description}
                     </span>
                   ) : null}
-                  {u.reason ? (
-                    <span className="text-xs text-muted-foreground">{u.reason}</span>
+                  {(u.reasons ?? (u.reason ? [u.reason] : [])).map((r) => (
+                    <span key={r} className="text-xs text-muted-foreground">
+                      {r}
+                    </span>
+                  ))}
+                  {u.severity ? (
+                    <span className="text-xs font-medium text-muted-foreground">
+                      Severity: {u.severity}
+                      {u.anomalyScore !== undefined && u.anomalyScore !== null
+                        ? ` · score ${Number(u.anomalyScore).toFixed(2)}`
+                        : ""}
+                      {u.detectionMethod ? ` · ${String(u.detectionMethod).replace(/_/g, " ")}` : ""}
+                    </span>
                   ) : null}
                 </div>
                 <span className="shrink-0 text-sm font-semibold">
