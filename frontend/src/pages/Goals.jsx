@@ -48,8 +48,14 @@ import {
   useUpdateGoalAutomation,
   useUpdateGoalStatus,
 } from "@/hooks/useGoals";
-import { formatBDT, formatBDTWhole, formatDate, formatDateTime } from "@/lib/format";
+import {
+  formatBDT,
+  formatBDTWhole,
+  formatDate,
+  formatDateTime,
+} from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useWallet } from "@/hooks/useWallet";
 
 // ---------------------------------------------------------------------------
 // Constants (these mirror the backend: models/Goal.js + goalControllers.js)
@@ -91,7 +97,10 @@ const PERCENTAGE_EXPLAINER =
 const PERCENTAGE_CHOICES_ERROR = "Choose one of 5%, 10%, 15%, 20%, or 25%.";
 
 const isLegacyPercentage = (v) =>
-  v !== null && v !== undefined && v !== "" && !AUTO_PERCENTAGES.includes(Number(v));
+  v !== null &&
+  v !== undefined &&
+  v !== "" &&
+  !AUTO_PERCENTAGES.includes(Number(v));
 
 function PercentageOptions({ value, onChange, idPrefix, legacy }) {
   return (
@@ -127,7 +136,8 @@ function PercentageOptions({ value, onChange, idPrefix, legacy }) {
       </div>
       {legacy != null ? (
         <p className="rounded-lg bg-[#FFD21F]/25 px-3 py-2 text-xs font-medium text-[#6b4f00] dark:text-[#FFD21F]">
-          Currently {legacy}% (older setting, still honored). Choose an option above to change it.
+          Currently {legacy}% (older setting, still honored). Choose an option
+          above to change it.
         </p>
       ) : null}
       <p className="text-xs text-muted-foreground">{PERCENTAGE_EXPLAINER}</p>
@@ -150,7 +160,8 @@ const errorMessage = (error, fallback) =>
   error?.response?.data?.message || fallback;
 
 // whole taka when possible, paise only when the amount really has them
-const money = (n) => (Number.isInteger(Number(n)) ? formatBDTWhole(n) : formatBDT(n));
+const money = (n) =>
+  Number.isInteger(Number(n)) ? formatBDTWhole(n) : formatBDT(n);
 
 const toInputDate = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
@@ -197,18 +208,23 @@ function timeLeftLabel(days) {
 }
 
 // Dhaka (UTC+6, no DST) wall-clock helpers for cycle labels.
-const dhakaWall = (now = new Date()) => new Date(now.getTime() + 6 * 60 * 60 * 1000);
+const dhakaWall = (now = new Date()) =>
+  new Date(now.getTime() + 6 * 60 * 60 * 1000);
 const dhakaMonthlyKey = (now = new Date()) => {
   const w = dhakaWall(now);
   return `${w.getUTCFullYear()}-${String(w.getUTCMonth() + 1).padStart(2, "0")}`;
 };
 const dhakaWeeklyKey = (now = new Date()) => {
   const w = dhakaWall(now);
-  const d = new Date(Date.UTC(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate()));
+  const d = new Date(
+    Date.UTC(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate()),
+  );
   const day = d.getUTCDay() || 7;
   d.setUTCDate(d.getUTCDate() + 4 - day);
   const isoYear = d.getUTCFullYear();
-  const week = Math.ceil(((d - new Date(Date.UTC(isoYear, 0, 1))) / 86400000 + 1) / 7);
+  const week = Math.ceil(
+    ((d - new Date(Date.UTC(isoYear, 0, 1))) / 86400000 + 1) / 7,
+  );
   return `${isoYear}-W${String(week).padStart(2, "0")}`;
 };
 
@@ -220,7 +236,9 @@ function nextCycleText(goal) {
   if (!a.enabled) return "Automation off";
   if (a.paused || goal.status !== "active") return "Automation paused";
   const key = a.frequency === "weekly" ? dhakaWeeklyKey() : dhakaMonthlyKey();
-  return a.frequency === "weekly" ? `Weekly · current cycle ${key}` : `Monthly · current cycle ${key}`;
+  return a.frequency === "weekly"
+    ? `Weekly · current cycle ${key}`
+    : `Monthly · current cycle ${key}`;
 }
 
 // The page only ever shows data the backend really has; a plan's estimate is
@@ -235,15 +253,35 @@ function estimateOf(goal) {
 // Small badge in the card's top-right corner.
 function badgeOf(goal, pct) {
   if (goal.status === "released")
-    return { text: "Released", icon: Undo2, tone: "bg-[#eaf3fc] text-[#064581] dark:bg-primary/15 dark:text-primary" };
+    return {
+      text: "Released",
+      icon: Undo2,
+      tone: "bg-[#eaf3fc] text-[#064581] dark:bg-primary/15 dark:text-primary",
+    };
   if (goal.status === "completed")
-    return { text: "Completed", icon: CheckCircle2, tone: "bg-success/12 text-success" };
+    return {
+      text: "Completed",
+      icon: CheckCircle2,
+      tone: "bg-success/12 text-success",
+    };
   if (goal.status === "paused")
-    return { text: "Paused", icon: Pause, tone: "bg-muted text-muted-foreground" };
+    return {
+      text: "Paused",
+      icon: Pause,
+      tone: "bg-muted text-muted-foreground",
+    };
   if (goal.status === "cancelled")
-    return { text: "Cancelled", icon: CircleAlert, tone: "bg-destructive/10 text-destructive" };
+    return {
+      text: "Cancelled",
+      icon: CircleAlert,
+      tone: "bg-destructive/10 text-destructive",
+    };
   if (daysLeftOf(goal) <= 0)
-    return { text: "Overdue", icon: CircleAlert, tone: "bg-destructive/10 text-destructive" };
+    return {
+      text: "Overdue",
+      icon: CircleAlert,
+      tone: "bg-destructive/10 text-destructive",
+    };
   if (pct >= ALMOST_THERE)
     return {
       text: "Almost there",
@@ -271,7 +309,11 @@ function ProgressBar({ pct, done, muted, label }) {
         style={{ "--pct": `${pct}%` }}
         className={cn(
           "h-full w-(--pct) rounded-full transition-[width] duration-700 ease-out starting:w-0 motion-reduce:transition-none",
-          done ? "bg-success" : muted ? "bg-muted-foreground/40" : "bg-[#064581] dark:bg-primary",
+          done
+            ? "bg-success"
+            : muted
+              ? "bg-muted-foreground/40"
+              : "bg-[#064581] dark:bg-primary",
         )}
       />
     </div>
@@ -284,7 +326,10 @@ function AutomationLine({ goal }) {
     return (
       <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
         <Undo2 className="size-3.5" aria-hidden="true" />
-        Released{goal.releasedAmount != null ? ` · ${money(goal.releasedAmount)} returned` : ""}
+        Released
+        {goal.releasedAmount != null
+          ? ` · ${money(goal.releasedAmount)} returned`
+          : ""}
         {goal.releasedAt ? ` · ${formatDate(goal.releasedAt)}` : ""}
       </p>
     );
@@ -305,7 +350,8 @@ function AutomationLine({ goal }) {
         {paused ? "Auto-save paused" : "Auto-save on"}
       </span>
       <span className="text-muted-foreground tabular-nums">
-        {a.frequency === "weekly" ? "Weekly" : "Monthly"} · {a.percentage}% · Priority {a.priority}
+        {a.frequency === "weekly" ? "Weekly" : "Monthly"} · {a.percentage}% ·
+        Priority {a.priority}
       </span>
       <span className="text-muted-foreground">{nextCycleText(goal)}</span>
     </div>
@@ -313,8 +359,19 @@ function AutomationLine({ goal }) {
 }
 
 function GoalCard({
-  goal, busy, autoBusy, onAdd, onEdit, onDelete, onStatus,
-  onAutomation, onPauseAutomation, onResumeAutomation, onHistory, onRunNow, runPending,
+  goal,
+  busy,
+  autoBusy,
+  onAdd,
+  onEdit,
+  onDelete,
+  onStatus,
+  onAutomation,
+  onPauseAutomation,
+  onResumeAutomation,
+  onHistory,
+  onRunNow,
+  runPending,
 }) {
   const pct = percentOf(goal);
   const badge = badgeOf(goal, pct);
@@ -383,7 +440,8 @@ function GoalCard({
               ) : null}
               {paused || cancelled ? (
                 <DropdownMenuItem onClick={() => onStatus(goal, "active")}>
-                  <Play aria-hidden="true" /> {paused ? "Resume goal" : "Reactivate goal"}
+                  <Play aria-hidden="true" />{" "}
+                  {paused ? "Resume goal" : "Reactivate goal"}
                 </DropdownMenuItem>
               ) : null}
               {!terminal ? (
@@ -406,7 +464,10 @@ function GoalCard({
                 <History aria-hidden="true" /> Transfer history
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem variant="destructive" onClick={() => onDelete(goal)}>
+              <DropdownMenuItem
+                variant="destructive"
+                onClick={() => onDelete(goal)}
+              >
                 <Trash2 aria-hidden="true" /> Delete goal
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -422,7 +483,10 @@ function GoalCard({
       </p>
 
       <p className="mt-3 flex flex-wrap items-baseline gap-x-2 tabular-nums">
-        <span className="font-heading text-3xl font-extrabold text-[#064581] dark:text-primary">
+        <span
+          data-testid="goal-saved"
+          className="font-heading text-3xl font-extrabold text-[#064581] dark:text-primary"
+        >
           {money(goal.savedAmount)}
         </span>
         <span className="text-[15px] text-muted-foreground">
@@ -438,7 +502,9 @@ function GoalCard({
           label={`${goal.title} progress`}
         />
         <div className="mt-2.5 flex items-center justify-between gap-3 text-sm">
-          <span className="font-semibold text-foreground tabular-nums">{pct}%</span>
+          <span className="font-semibold text-foreground tabular-nums">
+            {pct}%
+          </span>
           <span
             className="flex items-center gap-1.5 text-muted-foreground"
             title={formatDate(est.date)}
@@ -509,9 +575,17 @@ function GoalCard({
             <Button
               variant="outline"
               disabled={autoBusy}
-              onClick={() => (autoPaused ? onResumeAutomation(goal) : onPauseAutomation(goal))}
+              onClick={() =>
+                autoPaused ? onResumeAutomation(goal) : onPauseAutomation(goal)
+              }
               className="h-10 rounded-xl text-sm font-semibold"
-              title={a.enabled ? (autoPaused ? "Resume automatic saving" : "Pause automatic saving") : "Set up automatic saving"}
+              title={
+                a.enabled
+                  ? autoPaused
+                    ? "Resume automatic saving"
+                    : "Pause automatic saving"
+                  : "Set up automatic saving"
+              }
             >
               {autoBusy ? (
                 <Loader2 className="animate-spin" aria-hidden="true" />
@@ -520,7 +594,11 @@ function GoalCard({
               ) : (
                 <Pause aria-hidden="true" />
               )}
-              {a.enabled ? (autoPaused ? "Resume auto" : "Pause auto") : "Auto-save"}
+              {a.enabled
+                ? autoPaused
+                  ? "Resume auto"
+                  : "Pause auto"
+                : "Auto-save"}
             </Button>
             <Button
               variant="outline"
@@ -597,16 +675,35 @@ function Panel({ icon: Icon, tone, title, children }) {
   );
 }
 
-function ConfirmDialog({ open, title, description, confirmLabel, danger, pending, onCancel, onConfirm }) {
+function ConfirmDialog({
+  open,
+  title,
+  description,
+  confirmLabel,
+  danger,
+  pending,
+  onCancel,
+  onConfirm,
+}) {
   return (
-    <Dialog open={open} onOpenChange={(next) => { if (!next && !pending) onCancel?.(); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && !pending) onCancel?.();
+      }}
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="outline" className="h-10 rounded-xl px-4" onClick={onCancel} disabled={pending}>
+          <Button
+            variant="outline"
+            className="h-10 rounded-xl px-4"
+            onClick={onCancel}
+            disabled={pending}
+          >
             Cancel
           </Button>
           <Button
@@ -615,7 +712,9 @@ function ConfirmDialog({ open, title, description, confirmLabel, danger, pending
             onClick={onConfirm}
             disabled={pending}
           >
-            {pending ? <Loader2 className="animate-spin" aria-hidden="true" /> : null}
+            {pending ? (
+              <Loader2 className="animate-spin" aria-hidden="true" />
+            ) : null}
             {confirmLabel}
           </Button>
         </DialogFooter>
@@ -640,10 +739,16 @@ function GoalForm({ goal, goals, onDone }) {
   const [description, setDescription] = useState(goal?.description ?? "");
   const [amount, setAmount] = useState(goal ? String(goal.targetAmount) : "");
   const [date, setDate] = useState(initialDate);
-  const [autoEnabled, setAutoEnabled] = useState(Boolean(goal?.automation?.enabled));
-  const [frequency, setFrequency] = useState(goal?.automation?.frequency ?? "monthly");
+  const [autoEnabled, setAutoEnabled] = useState(
+    Boolean(goal?.automation?.enabled),
+  );
+  const [frequency, setFrequency] = useState(
+    goal?.automation?.frequency ?? "monthly",
+  );
   const [percentage, setPercentage] = useState(
-    goal?.automation?.percentage != null ? String(goal.automation.percentage) : "10",
+    goal?.automation?.percentage != null
+      ? String(goal.automation.percentage)
+      : "10",
   );
   const [priority, setPriority] = useState(
     goal?.automation?.priority != null ? String(goal.automation.priority) : "",
@@ -693,8 +798,15 @@ function GoalForm({ goal, goals, onDone }) {
         return setError(PERCENTAGE_CHOICES_ERROR);
       const pri = Number(priority);
       if (!Number.isInteger(pri) || pri < 1)
-        return setError("Priority must be a positive whole number (1 is highest).");
-      automation = { enabled: true, frequency, percentage: Number(percentage), priority: pri };
+        return setError(
+          "Priority must be a positive whole number (1 is highest).",
+        );
+      automation = {
+        enabled: true,
+        frequency,
+        percentage: Number(percentage),
+        priority: pri,
+      };
     }
     setError("");
 
@@ -715,8 +827,10 @@ function GoalForm({ goal, goals, onDone }) {
       autoBody = {};
       if (autoEnabled !== Boolean(stored.enabled)) autoBody.enabled = true;
       if (frequency !== stored.frequency) autoBody.frequency = frequency;
-      if (percentage !== String(stored.percentage ?? "")) autoBody.percentage = Number(percentage);
-      if (priority !== String(stored.priority ?? "")) autoBody.priority = Number(priority);
+      if (percentage !== String(stored.percentage ?? ""))
+        autoBody.percentage = Number(percentage);
+      if (priority !== String(stored.priority ?? ""))
+        autoBody.priority = Number(priority);
       // Freshly enabling: send complete details (all validated above).
       if (autoBody.enabled === true) {
         autoBody.frequency = frequency;
@@ -762,7 +876,11 @@ function GoalForm({ goal, goals, onDone }) {
     };
 
     if (editing) update.mutate({ id: goal._id, ...body }, options);
-    else create.mutate({ ...body, ...(automation ? { automation } : {}) }, options);
+    else
+      create.mutate(
+        { ...body, ...(automation ? { automation } : {}) },
+        options,
+      );
   };
 
   return (
@@ -830,7 +948,8 @@ function GoalForm({ goal, goals, onDone }) {
 
       <div className="grid gap-2">
         <Label htmlFor="goal-description">
-          Note <span className="font-normal text-muted-foreground">(optional)</span>
+          Note{" "}
+          <span className="font-normal text-muted-foreground">(optional)</span>
         </Label>
         <input
           id="goal-description"
@@ -852,14 +971,22 @@ function GoalForm({ goal, goals, onDone }) {
             className="mt-1 size-4 accent-[#0756A6]"
           />
           <span className="text-sm">
-            <span className="font-semibold text-foreground">Enable automatic saving</span>
-            <span className="block text-xs text-muted-foreground">{AUTO_CONSENT}</span>
+            <span className="font-semibold text-foreground">
+              Enable automatic saving
+            </span>
+            <span className="block text-xs text-muted-foreground">
+              {AUTO_CONSENT}
+            </span>
           </span>
         </label>
 
         {autoEnabled ? (
           <div className="mt-3 grid gap-3">
-            <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Frequency">
+            <div
+              className="grid grid-cols-2 gap-2"
+              role="radiogroup"
+              aria-label="Frequency"
+            >
               {[
                 { value: "weekly", label: "Weekly" },
                 { value: "monthly", label: "Monthly" },
@@ -906,8 +1033,13 @@ function GoalForm({ goal, goals, onDone }) {
               {PRIORITY_HINT}
             </p>
             {duplicatePriority ? (
-              <p role="alert" className="rounded-lg bg-[#FFD21F]/25 px-3 py-2 text-xs font-medium text-[#6b4f00] dark:text-[#FFD21F]">
-                Another automated goal already uses priority {Number(priority)}. Duplicates are allowed, but the oldest goal is funded first on ties.
+              <p
+                role="alert"
+                className="rounded-lg bg-[#FFD21F]/25 px-3 py-2 text-xs font-medium text-[#6b4f00] dark:text-[#FFD21F]"
+              >
+                Another automated goal already uses priority {Number(priority)}.
+                Duplicates are allowed, but the oldest goal is funded first on
+                ties.
               </p>
             ) : null}
           </div>
@@ -915,7 +1047,10 @@ function GoalForm({ goal, goals, onDone }) {
       </div>
 
       {error ? (
-        <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        <p
+          role="alert"
+          className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive"
+        >
           {error}
         </p>
       ) : null}
@@ -930,8 +1065,14 @@ function GoalForm({ goal, goals, onDone }) {
         >
           Cancel
         </Button>
-        <Button type="submit" className={cn("h-10 px-5", PRIMARY_BTN)} disabled={pending}>
-          {pending ? <Loader2 className="animate-spin" aria-hidden="true" /> : null}
+        <Button
+          type="submit"
+          className={cn("h-10 px-5", PRIMARY_BTN)}
+          disabled={pending}
+        >
+          {pending ? (
+            <Loader2 className="animate-spin" aria-hidden="true" />
+          ) : null}
           {editing ? "Save changes" : "Create goal"}
         </Button>
       </DialogFooter>
@@ -951,10 +1092,14 @@ function AutomationForm({ goal, goals, onDone }) {
   const [percentage, setPercentage] = useState(
     a.percentage != null ? String(a.percentage) : "10",
   );
-  const [priority, setPriority] = useState(a.priority != null ? String(a.priority) : "");
+  const [priority, setPriority] = useState(
+    a.priority != null ? String(a.priority) : "",
+  );
   const [error, setError] = useState("");
 
-  const legacyPercentage = isLegacyPercentage(a.percentage) ? a.percentage : null;
+  const legacyPercentage = isLegacyPercentage(a.percentage)
+    ? a.percentage
+    : null;
 
   const duplicatePriority =
     enabled && priority !== ""
@@ -988,7 +1133,9 @@ function AutomationForm({ goal, goals, onDone }) {
       }
       const pri = Number(priority);
       if (!Number.isInteger(pri) || pri < 1)
-        return setError("Priority must be a positive whole number (1 is highest).");
+        return setError(
+          "Priority must be a positive whole number (1 is highest).",
+        );
       body.frequency = frequency;
       body.priority = pri;
     }
@@ -1000,7 +1147,8 @@ function AutomationForm({ goal, goals, onDone }) {
           toast.success(enabled ? "Auto-save enabled" : "Auto-save disabled");
           onDone();
         },
-        onError: (err) => setError(errorMessage(err, "Could not update automation.")),
+        onError: (err) =>
+          setError(errorMessage(err, "Could not update automation.")),
       },
     );
   };
@@ -1023,12 +1171,18 @@ function AutomationForm({ goal, goals, onDone }) {
           onChange={(e) => setEnabled(e.target.checked)}
           className="mt-1 size-4 accent-[#0756A6]"
         />
-        <span className="text-sm font-semibold text-foreground">Enable automatic saving</span>
+        <span className="text-sm font-semibold text-foreground">
+          Enable automatic saving
+        </span>
       </label>
 
       {enabled ? (
         <div className="grid gap-3">
-          <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Frequency">
+          <div
+            className="grid grid-cols-2 gap-2"
+            role="radiogroup"
+            aria-label="Frequency"
+          >
             {[
               { value: "weekly", label: "Weekly" },
               { value: "monthly", label: "Monthly" },
@@ -1074,25 +1228,44 @@ function AutomationForm({ goal, goals, onDone }) {
             {PRIORITY_HINT}
           </p>
           {duplicatePriority ? (
-            <p role="alert" className="rounded-lg bg-[#FFD21F]/25 px-3 py-2 text-xs font-medium text-[#6b4f00] dark:text-[#FFD21F]">
-              Another automated goal already uses priority {Number(priority)}. Oldest first on ties.
+            <p
+              role="alert"
+              className="rounded-lg bg-[#FFD21F]/25 px-3 py-2 text-xs font-medium text-[#6b4f00] dark:text-[#FFD21F]"
+            >
+              Another automated goal already uses priority {Number(priority)}.
+              Oldest first on ties.
             </p>
           ) : null}
         </div>
       ) : null}
 
       {error ? (
-        <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        <p
+          role="alert"
+          className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive"
+        >
           {error}
         </p>
       ) : null}
 
       <DialogFooter>
-        <Button type="button" variant="outline" className="h-10 rounded-xl px-4" onClick={onDone} disabled={save.isPending}>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-10 rounded-xl px-4"
+          onClick={onDone}
+          disabled={save.isPending}
+        >
           Cancel
         </Button>
-        <Button type="submit" className={cn("h-10 px-5", PRIMARY_BTN)} disabled={save.isPending}>
-          {save.isPending ? <Loader2 className="animate-spin" aria-hidden="true" /> : null}
+        <Button
+          type="submit"
+          className={cn("h-10 px-5", PRIMARY_BTN)}
+          disabled={save.isPending}
+        >
+          {save.isPending ? (
+            <Loader2 className="animate-spin" aria-hidden="true" />
+          ) : null}
           Save
         </Button>
       </DialogFooter>
@@ -1108,24 +1281,38 @@ function TransferHistoryDialog({ goal, onClose }) {
   const { data, isLoading, error } = useGoalTransfers(goal?._id);
   const transfers = data?.transfers ?? [];
   return (
-    <Dialog open={Boolean(goal)} onOpenChange={(next) => { if (!next) onClose(); }}>
+    <Dialog
+      open={Boolean(goal)}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="font-heading text-lg text-[#064581] dark:text-primary">
             Transfer history
           </DialogTitle>
           <DialogDescription>
-            {goal ? `${goal.title} · every automatic move is recorded here and never deleted.` : ""}
+            {goal
+              ? `${goal.title} · every automatic move is recorded here and never deleted.`
+              : ""}
           </DialogDescription>
         </DialogHeader>
         {isLoading ? (
-          <div className="space-y-2" role="status" aria-label="Loading transfers">
+          <div
+            className="space-y-2"
+            role="status"
+            aria-label="Loading transfers"
+          >
             {[0, 1, 2].map((i) => (
               <Skeleton key={i} className="h-14 w-full rounded-xl bg-muted" />
             ))}
           </div>
         ) : error ? (
-          <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          <p
+            role="alert"
+            className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          >
             {errorMessage(error, "Could not load transfer history.")}
           </p>
         ) : transfers.length === 0 ? (
@@ -1135,7 +1322,10 @@ function TransferHistoryDialog({ goal, onClose }) {
         ) : (
           <ul className="max-h-80 space-y-2 overflow-y-auto pr-1">
             {transfers.map((t) => (
-              <li key={t._id} className="rounded-xl border border-input px-3 py-2.5 text-sm">
+              <li
+                key={t._id}
+                className="rounded-xl border border-input px-3 py-2.5 text-sm"
+              >
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-semibold text-foreground">
                     {t.type === "goal_release"
@@ -1151,14 +1341,19 @@ function TransferHistoryDialog({ goal, onClose }) {
                   </span>
                 </div>
                 <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">
-                  Cycle {t.cycleKey} · {formatDateTime(t.createdAt)} · Wallet {money(t.walletBalanceBefore)} → {money(t.walletBalanceAfter)}
+                  Cycle {t.cycleKey} · {formatDateTime(t.createdAt)} · Wallet{" "}
+                  {money(t.walletBalanceBefore)} → {money(t.walletBalanceAfter)}
                 </p>
               </li>
             ))}
           </ul>
         )}
         <DialogFooter>
-          <Button variant="outline" className="h-10 rounded-xl px-4" onClick={onClose}>
+          <Button
+            variant="outline"
+            className="h-10 rounded-xl px-4"
+            onClick={onClose}
+          >
             Close
           </Button>
         </DialogFooter>
@@ -1189,7 +1384,10 @@ function AddMoneyForm({ goal, onDone }) {
   const value = Number(amount);
   const valid = Number.isFinite(value) && value > 0;
   const afterPct = valid
-    ? Math.min(100, Math.round(((goal.savedAmount + value) / goal.targetAmount) * 100))
+    ? Math.min(
+        100,
+        Math.round(((goal.savedAmount + value) / goal.targetAmount) * 100),
+      )
     : null;
 
   const chips = QUICK_AMOUNTS.filter((q) => q < remaining);
@@ -1198,7 +1396,9 @@ function AddMoneyForm({ goal, onDone }) {
     e.preventDefault();
     if (!valid) return setError("Enter an amount greater than 0.");
     if (value > remaining)
-      return setError(`You only need ${money(remaining)} more to reach this goal.`);
+      return setError(
+        `You only need ${money(remaining)} more to reach this goal.`,
+      );
     setError("");
 
     add.mutate(
@@ -1214,7 +1414,9 @@ function AddMoneyForm({ goal, onDone }) {
             return;
           }
           if (res?.goal?.status === "completed")
-            toast.success(`You reached "${goal.title}"! ${money(value)} moved to the goal.`);
+            toast.success(
+              `You reached "${goal.title}"! ${money(value)} moved to the goal.`,
+            );
           else toast.success(`${money(value)} added to ${goal.title}`);
           onDone();
         },
@@ -1231,7 +1433,8 @@ function AddMoneyForm({ goal, onDone }) {
           Add money
         </DialogTitle>
         <DialogDescription>
-          {goal.title} &middot; {money(goal.savedAmount)} of {money(goal.targetAmount)} saved
+          {goal.title} &middot; {money(goal.savedAmount)} of{" "}
+          {money(goal.targetAmount)} saved
         </DialogDescription>
       </DialogHeader>
 
@@ -1259,7 +1462,11 @@ function AddMoneyForm({ goal, onDone }) {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2" role="group" aria-label="Quick amounts">
+      <div
+        className="flex flex-wrap gap-2"
+        role="group"
+        aria-label="Quick amounts"
+      >
         {chips.map((q) => (
           <button
             key={q}
@@ -1300,12 +1507,18 @@ function AddMoneyForm({ goal, onDone }) {
       </p>
 
       {error ? (
-        <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        <p
+          role="alert"
+          className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive"
+        >
           {error}
         </p>
       ) : null}
       {notice ? (
-        <p role="status" className="rounded-lg bg-[#eaf3fc] px-3 py-2 text-sm text-[#064581] dark:bg-primary/15 dark:text-primary">
+        <p
+          role="status"
+          className="rounded-lg bg-[#eaf3fc] px-3 py-2 text-sm text-[#064581] dark:bg-primary/15 dark:text-primary"
+        >
           {notice}
         </p>
       ) : null}
@@ -1320,7 +1533,11 @@ function AddMoneyForm({ goal, onDone }) {
         >
           Cancel
         </Button>
-        <Button type="submit" className={cn("h-10 px-5", PRIMARY_BTN)} disabled={add.isPending}>
+        <Button
+          type="submit"
+          className={cn("h-10 px-5", PRIMARY_BTN)}
+          disabled={add.isPending}
+        >
           {add.isPending ? (
             <Loader2 className="animate-spin" aria-hidden="true" />
           ) : (
@@ -1343,6 +1560,8 @@ const Goals = () => {
   const autoMutation = useUpdateGoalAutomation();
   const runNow = useRunAutomationNow();
   const remove = useDeleteGoal();
+  const walletQuery = useWallet();
+  const walletBalance = walletQuery.data?.wallet?.balance;
 
   const [tab, setTab] = useState("all");
   const [formGoal, setFormGoal] = useState(null); // goal being edited
@@ -1356,7 +1575,13 @@ const Goals = () => {
   const goals = useMemo(() => data?.goals ?? [], [data]);
 
   const counts = useMemo(() => {
-    const c = { all: goals.length, active: 0, paused: 0, completed: 0, released: 0 };
+    const c = {
+      all: goals.length,
+      active: 0,
+      paused: 0,
+      completed: 0,
+      released: 0,
+    };
     for (const g of goals) if (g.status in c) c[g.status] += 1;
     return c;
   }, [goals]);
@@ -1387,7 +1612,9 @@ const Goals = () => {
       {
         onSuccess: () =>
           toast.success(
-            status === "paused" ? "Goal paused" : `${goal.title} is active again`,
+            status === "paused"
+              ? "Goal paused"
+              : `${goal.title} is active again`,
           ),
         onError: (err) =>
           toast.error(errorMessage(err, "Could not update the goal.")),
@@ -1402,8 +1629,14 @@ const Goals = () => {
         const r = res?.summary?.releases ?? [];
         const funded = c.filter((x) => x.status === "contributed");
         const released = r.filter((x) => x.status === "released");
-        const fundedTotal = funded.reduce((s, x) => s + (Number(x.amount) || 0), 0);
-        const releasedTotal = released.reduce((s, x) => s + (Number(x.amount) || 0), 0);
+        const fundedTotal = funded.reduce(
+          (s, x) => s + (Number(x.amount) || 0),
+          0,
+        );
+        const releasedTotal = released.reduce(
+          (s, x) => s + (Number(x.amount) || 0),
+          0,
+        );
         const parts = [];
         parts.push(
           funded.length > 0
@@ -1417,7 +1650,8 @@ const Goals = () => {
         );
         toast.success(`Cycle processed: ${parts.join(", ")}.`);
       },
-      onError: (err) => toast.error(errorMessage(err, "Could not run the cycle.")),
+      onError: (err) =>
+        toast.error(errorMessage(err, "Could not run the cycle.")),
     });
   };
 
@@ -1439,13 +1673,16 @@ const Goals = () => {
                 : "Already deleted.",
             );
           } else if (refunded > 0) {
-            toast.success(`Goal deleted. ${money(refunded)} returned to your wallet.`);
+            toast.success(
+              `Goal deleted. ${money(refunded)} returned to your wallet.`,
+            );
           } else {
             toast.success("Goal deleted");
           }
           setToDelete(null);
         },
-        onError: (err) => toast.error(errorMessage(err, "Could not delete the goal.")),
+        onError: (err) =>
+          toast.error(errorMessage(err, "Could not delete the goal.")),
       },
     );
   };
@@ -1475,15 +1712,14 @@ const Goals = () => {
           );
           setConfirm(null);
         },
-        onError: (err) => toast.error(errorMessage(err, "Could not update automation.")),
+        onError: (err) =>
+          toast.error(errorMessage(err, "Could not update automation.")),
       },
     );
   };
 
-  const busyId =
-    statusMutation.isPending ? statusMutation.variables?.id : null;
-  const autoBusyId =
-    autoMutation.isPending ? autoMutation.variables?.id : null;
+  const busyId = statusMutation.isPending ? statusMutation.variables?.id : null;
+  const autoBusyId = autoMutation.isPending ? autoMutation.variables?.id : null;
 
   const confirmText = (kind, goal) => {
     if (kind === "pause-auto")
@@ -1516,6 +1752,17 @@ const Goals = () => {
           </h2>
           <p className="mt-1.5 text-[15px] text-muted-foreground">
             Small, steady deposits add up.
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Wallet:{" "}
+            <span
+              data-testid="wallet-balance"
+              className="font-semibold tabular-nums text-foreground"
+            >
+              {walletBalance === undefined
+                ? "\u2014"
+                : formatBDTWhole(walletBalance)}
+            </span>
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -1583,7 +1830,9 @@ const Goals = () => {
 
           {totals.count > 0 ? (
             <p className="text-sm text-muted-foreground tabular-nums">
-              <span className="font-semibold text-foreground">{money(totals.saved)}</span>{" "}
+              <span className="font-semibold text-foreground">
+                {money(totals.saved)}
+              </span>{" "}
               saved of {money(totals.target)} across {totals.count} active{" "}
               {totals.count === 1 ? "goal" : "goals"}
             </p>
@@ -1594,11 +1843,24 @@ const Goals = () => {
       {isLoading ? (
         <GoalsSkeleton />
       ) : error ? (
-        <Panel icon={CircleAlert} tone="bg-destructive/10 text-destructive" title="Goals unavailable">
-          <p role="alert" className="mt-1 max-w-sm text-sm text-muted-foreground">
-            {errorMessage(error, "We could not load your goals. Please try again.")}
+        <Panel
+          icon={CircleAlert}
+          tone="bg-destructive/10 text-destructive"
+          title="Goals unavailable"
+        >
+          <p
+            role="alert"
+            className="mt-1 max-w-sm text-sm text-muted-foreground"
+          >
+            {errorMessage(
+              error,
+              "We could not load your goals. Please try again.",
+            )}
           </p>
-          <Button className={cn("mt-5 h-10 px-5", PRIMARY_BTN)} onClick={() => refetch()}>
+          <Button
+            className={cn("mt-5 h-10 px-5", PRIMARY_BTN)}
+            onClick={() => refetch()}
+          >
             Try again
           </Button>
         </Panel>
@@ -1609,9 +1871,13 @@ const Goals = () => {
           title="No goals yet"
         >
           <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-            Name something you're saving for, set an amount and a date, and watch it grow with every deposit.
+            Name something you're saving for, set an amount and a date, and
+            watch it grow with every deposit.
           </p>
-          <Button className={cn("mt-5 h-10 px-5", PRIMARY_BTN)} onClick={openCreate}>
+          <Button
+            className={cn("mt-5 h-10 px-5", PRIMARY_BTN)}
+            onClick={openCreate}
+          >
             <Plus aria-hidden="true" /> Create your first goal
           </Button>
         </Panel>
@@ -1621,7 +1887,11 @@ const Goals = () => {
           tone="bg-brand-soft text-brand dark:bg-primary/15 dark:text-primary"
           title={`No ${tab} goals`}
         >
-          <Button variant="outline" className="mt-5 h-10 rounded-xl px-5" onClick={() => setTab("all")}>
+          <Button
+            variant="outline"
+            className="mt-5 h-10 rounded-xl px-5"
+            onClick={() => setTab("all")}
+          >
             Show all goals
           </Button>
         </Panel>
@@ -1644,8 +1914,12 @@ const Goals = () => {
               onDelete={setToDelete}
               onStatus={changeStatus}
               onAutomation={setAutoGoal}
-              onPauseAutomation={(g) => setConfirm({ kind: "pause-auto", goal: g })}
-              onResumeAutomation={(g) => setConfirm({ kind: "resume-auto", goal: g })}
+              onPauseAutomation={(g) =>
+                setConfirm({ kind: "pause-auto", goal: g })
+              }
+              onResumeAutomation={(g) =>
+                setConfirm({ kind: "resume-auto", goal: g })
+              }
               onHistory={setHistoryGoal}
               onRunNow={runNowForUser}
               runPending={runNow.isPending}
@@ -1662,7 +1936,11 @@ const Goals = () => {
         }}
       >
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
-          <GoalForm goal={formGoal} goals={goals} onDone={() => setFormOpen(false)} />
+          <GoalForm
+            goal={formGoal}
+            goals={goals}
+            onDone={() => setFormOpen(false)}
+          />
         </DialogContent>
       </Dialog>
 
@@ -1704,7 +1982,10 @@ const Goals = () => {
 
       {/* transfer history */}
       {historyGoal ? (
-        <TransferHistoryDialog goal={historyGoal} onClose={() => setHistoryGoal(null)} />
+        <TransferHistoryDialog
+          goal={historyGoal}
+          onClose={() => setHistoryGoal(null)}
+        />
       ) : null}
 
       {/* pause / resume / disable automation */}

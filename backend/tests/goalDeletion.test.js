@@ -9,7 +9,7 @@ import GoalTransfer from "../src/models/GoalTransfer.js";
 import {
   executeGoalDeletion,
   processReleasesForUser,
-} from "../src/services/goalAutomationService.js";
+} from "../src/services/goalAutomationService.js"; 
 
 let replset;
 

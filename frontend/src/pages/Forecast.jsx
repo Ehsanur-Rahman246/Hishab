@@ -372,7 +372,7 @@ function TrendCard({ rows, insight }) {
         style={{ gridTemplateColumns: `repeat(${rows.length}, minmax(0, 1fr))` }}
       >
         {rows.map((r) => (
-          <div key={r.key} className="min-w-0 rounded-lg bg-muted/60 px-2.5 py-2">
+          <div key={r.key} data-testid="forecast-week" className="min-w-0 rounded-lg bg-muted/60 px-2.5 py-2">
             <div className="flex items-center justify-between gap-1">
               <span className="truncate text-xs text-muted-foreground">{r.label}</span>
               <span

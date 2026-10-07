@@ -13,7 +13,7 @@ import {
   isGoalDeleteMessage,
   resolveGoalFromHint,
 } from "../src/services/aiGoalActionService.js";
-import { handleCoachGoalDeleteMessage } from "../src/controllers/aiGoalControllers.js";
+import { handleCoachGoalDeleteMessage } from "../src/controllers/aiGoalControllers.js"; 
 
 let replset;
 const futureDate = () => new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);

@@ -11,7 +11,7 @@ import {
   isGoalAddMoneyMessage,
   parseGoalAddMoneyIntent,
 } from "../src/services/aiGoalActionService.js";
-import { handleCoachGoalAddMoneyMessage } from "../src/controllers/aiGoalControllers.js";
+import { handleCoachGoalAddMoneyMessage } from "../src/controllers/aiGoalControllers.js"; 
 
 let replset;
 const futureDate = () => new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);

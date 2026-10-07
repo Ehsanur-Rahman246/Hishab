@@ -168,7 +168,7 @@ function Evidence({ evidence }) {
 
 function Analysis({ text, coach, tags, goalAction, onConfirmDelete, confirming, addMoneyAction, onConfirmAddMoney }) {
   return (
-    <div className="rounded-2xl bg-secondary/80 p-5 ring-1 ring-primary/10">
+    <div data-testid="coach-reply" className="rounded-2xl bg-secondary/80 p-5 ring-1 ring-primary/10">
       <span className="inline-flex items-center gap-1 rounded-full bg-accent px-2.5 py-0.5 text-[11px] font-bold tracking-wide text-accent-foreground uppercase">
         <Sparkles className="size-3" aria-hidden="true" /> AI analysis
       </span>
