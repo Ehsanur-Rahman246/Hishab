@@ -7,6 +7,8 @@ import Wallet from "../src/models/Wallet.js";
 import Transaction from "../src/models/Transaction.js";
 import GoalTransfer from "../src/models/GoalTransfer.js";
 import ChatMessage from "../src/models/ChatMessage.js";
+import PendingGoalAction from "../src/models/PendingGoalAction.js";
+import GoalActionAudit from "../src/models/GoalActionAudit.js";
 import {
   isGoalAddMoneyMessage,
   parseGoalAddMoneyIntent,
@@ -35,6 +37,8 @@ beforeEach(async () => {
     Transaction.deleteMany({}),
     GoalTransfer.deleteMany({}),
     ChatMessage.deleteMany({}),
+    PendingGoalAction.deleteMany({}),
+    GoalActionAudit.deleteMany({}),
   ]);
 });
 
@@ -81,8 +85,9 @@ describe("ai add-money parsing (no DB)", () => {
   });
 });
 
-describe("ai chat add-money flow", () => {
-  it("2. exact goal + amount adds money with correct records", async () => {
+describe("ai chat add-money flow (confirm-first: chat proposes, token confirms)", () => {
+  it("2. exact goal + amount PROPOSES without moving money; token confirm moves it once", async () => {
+    const { confirmGoalContribution } = await import("../src/services/goalActionProposalService.js");
     const user = newUser();
     await makeWallet(user, 5000);
     await makeGoal(user, { title: "iPhone", savedAmount: 0 });
@@ -91,14 +96,22 @@ describe("ai chat add-money flow", () => {
       userId: String(user),
       message: "Add 1000 taka to my iPhone goal.",
       language: "en",
-      idempotencyKey: "key-exact-1",
     });
     assert.equal(out.handled, true);
-    assert.equal(out.added, true);
-    assert.equal(out.action, "added");
+    assert.equal(out.added, false);
+    assert.equal(out.action, "confirm_required");
+    assert.ok(out.confirmationToken);
     assert.match(out.reply, /iPhone/);
     assert.match(out.reply, /1,000/);
+    // No money moved on propose.
+    assert.equal(Number((await Wallet.findOne({ user })).balance), 5000);
+    assert.equal(Number((await Goal.findOne({ user })).savedAmount), 0);
+    assert.equal(await GoalTransfer.countDocuments({ user }), 0);
 
+    const { result } = await confirmGoalContribution({
+      userId: String(user), confirmationToken: out.confirmationToken, idempotencyKey: "key-exact-1",
+    });
+    assert.equal(result.status, "contributed");
     assert.equal(Number((await Wallet.findOne({ user })).balance), 4000);
     assert.equal(Number((await Goal.findOne({ user })).savedAmount), 1000);
     const ledgers = await GoalTransfer.find({ user, type: "manual_contribution" });
@@ -109,7 +122,8 @@ describe("ai chat add-money flow", () => {
     assert.equal(Number(txs[0].amount), 1000);
   });
 
-  it("2b. Bangla conditional command executes when balance is strictly greater", async () => {
+  it("2b. Bangla conditional command proposes when balance is strictly greater", async () => {
+    const { confirmGoalContribution } = await import("../src/services/goalActionProposalService.js");
     const user = newUser();
     await makeWallet(user, 1000);
     await makeGoal(user, { title: "iPhone", savedAmount: 0 });
@@ -118,10 +132,11 @@ describe("ai chat add-money flow", () => {
       userId: String(user),
       message: "আমার wallet এ 500 টাকার বেশি থাকলে iPhone goal এ 500 টাকা add করে দাও",
       language: "auto",
-      idempotencyKey: "key-bn-1",
     });
-    assert.equal(out.added, true);
-    assert.equal(out.action, "added");
+    assert.equal(out.added, false);
+    assert.equal(out.action, "confirm_required");
+    assert.equal(Number((await Wallet.findOne({ user })).balance), 1000);
+    await confirmGoalContribution({ userId: String(user), confirmationToken: out.confirmationToken });
     assert.equal(Number((await Wallet.findOne({ user })).balance), 500);
     assert.equal(Number((await Goal.findOne({ user })).savedAmount), 500);
   });
@@ -250,7 +265,8 @@ describe("ai chat add-money flow", () => {
     assert.equal(await Transaction.countDocuments({}), 0);
   });
 
-  it("7. duplicate/retried AI action does not deduct twice", async () => {
+  it("7. token replay + idempotent retry cannot duplicate a transfer", async () => {
+    const { confirmGoalContribution } = await import("../src/services/goalActionProposalService.js");
     const user = newUser();
     await makeWallet(user, 5000);
     await makeGoal(user, { title: "iPhone", savedAmount: 0 });
@@ -260,19 +276,27 @@ describe("ai chat add-money flow", () => {
       userId: String(user),
       message: msg,
       language: "en",
-      idempotencyKey: "key-dup-1",
     });
-    assert.equal(first.added, true);
-    assert.equal(first.action, "added");
+    assert.equal(first.added, false);
+    assert.equal(first.action, "confirm_required");
 
-    const second = await handleCoachGoalAddMoneyMessage({
-      userId: String(user),
-      message: msg,
-      language: "en",
-      idempotencyKey: "key-dup-1",
+    const c1 = await confirmGoalContribution({
+      userId: String(user), confirmationToken: first.confirmationToken, idempotencyKey: "key-dup-1",
     });
-    assert.equal(second.added, true);
-    assert.equal(second.action, "duplicate");
+    assert.equal(c1.result.status, "contributed");
+
+    // Replaying the same token is rejected (one-time-use).
+    await assert.rejects(
+      confirmGoalContribution({ userId: String(user), confirmationToken: first.confirmationToken }),
+      /already used/,
+    );
+    // Retrying the money step with the same idempotency key also collapses.
+    const { executeManualContribution } = await import("../src/services/goalAutomationService.js");
+    const goal = await Goal.findOne({ user });
+    const dup = await executeManualContribution({
+      userId: String(user), goalId: String(goal._id), amount: 1000, idempotencyKey: "key-dup-1",
+    });
+    assert.equal(dup.status, "duplicate");
 
     assert.equal(Number((await Wallet.findOne({ user })).balance), 4000);
     assert.equal(Number((await Goal.findOne({ user })).savedAmount), 1000);

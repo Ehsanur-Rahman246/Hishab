@@ -72,6 +72,31 @@ const forecastSnapshotSchema = new mongoose.Schema(
       min: 1,
     },
 
+    // Honest temporal evaluation (LinearRegression vs historical-average
+    // baseline on the final untouched 4-week holdout). Null for snapshots
+    // saved before this upgrade. Mixed so the ML service can evolve its
+    // metric fields without a migration.
+    evaluation: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+
+    // Salary-cycle + festival signal state (evidence-gated, user history
+    // only). Null for snapshots saved before this upgrade.
+    patternSignals: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+
+    // Machine-readable forecast benchmark (LinearRegression vs
+    // historical-average on the final untouched 4-week holdout, per-series
+    // winners). Null for snapshots saved before this upgrade. Mixed so the
+    // ML service can evolve its metric fields without a migration.
+    forecastEvaluation: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+
     weeks: {
       type: [weekForecastSchema],
       required: true,

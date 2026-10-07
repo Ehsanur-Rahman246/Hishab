@@ -1,4 +1,9 @@
 import Groq from "groq-sdk";
+import {
+  CAUTIOUS_NUMBERS_NOTE,
+  collectTrustedNumbers,
+  findUnsupportedFinancialClaims,
+} from "./coachNumericalScorer.js";
 
 // Service layer for the bilingual AI Financial Coach.
 // Only this file talks to Groq. The API key and model name come
@@ -222,4 +227,63 @@ export const parseAndValidateCoachJson = (rawText, requestedLanguage) => {
   }
 
   return { ok: true, coach: { language, headline, answer, actions, tone, disclaimer } };
+};
+
+// Runtime numerical-grounding guard (best-effort, never throws).
+// Checks every monetary/percentage/amount-like figure in the validated reply
+// against numbers derivable from the supplied trusted context. Full semantic
+// verification is impossible (a paraphrased ratio may legitimately miss),
+// so an unsupported figure REPLACES the answer with a conservative response
+// stating the exact amount cannot be verified from available data (a bare
+// disclaimer appendix is not enough). Valid grounded answers pass untouched.
+// Returns { coach, numericGrounding } with numericGrounding.replaced flag.
+export const conservativeFallbackAnswer = (language = "en") => {
+  if (language === "bn") {
+    return "আপনার উপলব্ধ তথ্য থেকে সঠিক অঙ্কটি যাচাই করা যায়নি, তাই আমি কোনো নির্দিষ্ট টাকার অঙ্ক বলছি না। সঠিক সংখ্যার জন্য Transactions / Goals পেজ দেখুন।";
+  }
+  if (language === "mixed") {
+    return "Apnar available data theke exact amount verify kora jayni, tai ami kono specific figure bolchi na. Exact number-er jonno Transactions / Goals page dekhun. / The exact amount cannot be verified from your available data, so no figure is stated here.";
+  }
+  return "The exact amount cannot be verified from your available data, so I'm not stating a figure. Please check the Transactions / Goals pages for the exact number.";
+};
+
+export const applyNumericGroundingGuard = (coach, context) => {
+  const fallback = {
+    coach,
+    numericGrounding: { checked: false, unsupportedClaims: [], replaced: false },
+  };
+  try {
+    const text = [
+      coach?.headline ?? "",
+      coach?.answer ?? "",
+      ...((coach?.actions ?? []).map(
+        (a) => `${a?.title ?? ""} ${a?.detail ?? ""}`,
+      ) ?? []),
+    ].join("\n");
+    const trusted = collectTrustedNumbers(context ?? {});
+    const unsupported = findUnsupportedFinancialClaims(text, trusted);
+    if (unsupported.length === 0) {
+      return {
+        coach,
+        numericGrounding: { checked: true, unsupportedClaims: [], replaced: false },
+      };
+    }
+    const lang = coach?.language === "bn" ? "bn" : coach?.language === "mixed" ? "mixed" : "en";
+    const guarded = {
+      ...coach,
+      answer: conservativeFallbackAnswer(lang),
+      actions: [],
+      disclaimer: `${coach.disclaimer}${CAUTIOUS_NUMBERS_NOTE}`,
+    };
+    return {
+      coach: guarded,
+      numericGrounding: {
+        checked: true,
+        unsupportedClaims: unsupported.map((u) => u.raw),
+        replaced: true,
+      },
+    };
+  } catch {
+    return fallback;
+  }
 };

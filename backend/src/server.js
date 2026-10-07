@@ -4,6 +4,7 @@ import { connectDB } from "./config/db.js";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import authRouter from "./routes/authRoutes.js";
+import { requireCsrf } from "./middleware/csrf.js";
 import walletRouter from "./routes/walletRoutes.js";
 import transactionRouter from "./routes/transactionRoutes.js";
 import goalRouter from "./routes/goalRoutes.js";
@@ -24,6 +25,10 @@ const allowedOrigins =
 app.set("trust proxy", 1);
 app.use(express.json());
 app.use(cookieParser());
+// CSRF: double-submit token required for state-changing cookie-authenticated
+// routes (SameSite alone is not sufficient). Safe methods + session-establishing
+// auth endpoints are exempt (see middleware/csrf.js).
+app.use(requireCsrf);
 app.use(cors({ origin: allowedOrigins, credentials: true }));
 
 app.get("/", (_, res) => res.send("Server working"));

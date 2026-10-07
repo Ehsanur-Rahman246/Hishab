@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DataQualityNotice } from "@/components/ai/DataQualityNotice";
+import { EvaluationSection } from "@/components/ai/EvaluationSection";
 import { ForecastSection } from "@/components/ai/ForecastSection";
 import { InsightsSkeleton } from "@/components/ai/InsightsSkeleton";
 import { OverallRiskCard } from "@/components/ai/OverallRiskCard";
@@ -32,6 +33,8 @@ import { useAskCoach } from "@/hooks/useAiCoach";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { useDeleteAllMessages, useMessages } from "@/hooks/useChat";
 import { confirmGoalAddMoney, confirmGoalDelete } from "@/api/aiGoalApi";
+import { confirmGoalAddMoneyToken, cancelGoalAddMoneyToken } from "@/api/aiGoalApi";
+import { TrustAndSafety } from "@/components/ai/TrustAndSafety";
 import { useSummaries } from "@/hooks/useSummaries";
 import { useQueryClient } from "@tanstack/react-query";
 import { CATEGORIES, monthKey, recentMonths } from "@/lib/dashboard";
@@ -166,7 +169,7 @@ function Evidence({ evidence }) {
   );
 }
 
-function Analysis({ text, coach, tags, goalAction, onConfirmDelete, confirming, addMoneyAction, onConfirmAddMoney }) {
+function Analysis({ text, coach, tags, goalAction, onConfirmDelete, confirming, addMoneyAction, onConfirmAddMoney, onConfirmAddMoneyToken, onCancelAddMoneyToken }) {
   return (
     <div className="rounded-2xl bg-secondary/80 p-5 ring-1 ring-primary/10">
       <span className="inline-flex items-center gap-1 rounded-full bg-accent px-2.5 py-0.5 text-[11px] font-bold tracking-wide text-accent-foreground uppercase">
@@ -254,6 +257,37 @@ function Analysis({ text, coach, tags, goalAction, onConfirmDelete, confirming, 
               </li>
             ))}
           </ul>
+        </div>
+      ) : null}
+      {addMoneyAction?.kind === "confirm_required" && addMoneyAction?.confirmationToken ? (
+        <div className="mt-4 rounded-xl border border-warning/40 bg-card p-4">
+          <p className="text-sm font-semibold">
+            Confirm transfer{addMoneyAction.amount ? ` of ${formatBDTWhole(addMoneyAction.amount)}` : ""}
+            {addMoneyAction.goal ? ` to “${addMoneyAction.goal.title}”` : ""}?
+          </p>
+          {addMoneyAction.walletImpact ? (
+            <p className="mt-1 text-xs text-muted-foreground tabular-nums">
+              Wallet {formatBDTWhole(addMoneyAction.walletImpact.before)} → {formatBDTWhole(addMoneyAction.walletImpact.after)}.
+              No money has moved yet. The confirmation is short-lived, one-time-use, and bound to you and this action.
+            </p>
+          ) : null}
+          <div className="mt-3 flex gap-2">
+            <Button
+              className="h-10 rounded-xl px-4"
+              disabled={confirming}
+              onClick={() => onConfirmAddMoneyToken?.(addMoneyAction.confirmationToken)}
+            >
+              {confirming ? "Confirming…" : "Confirm transfer"}
+            </Button>
+            <Button
+              variant="outline"
+              className="h-10 rounded-xl px-4"
+              disabled={confirming}
+              onClick={() => onCancelAddMoneyToken?.(addMoneyAction.confirmationToken)}
+            >
+              Cancel
+            </Button>
+          </div>
         </div>
       ) : null}
       {addMoneyAction?.kind === "ambiguous" && addMoneyAction?.matches?.length ? (
@@ -482,6 +516,46 @@ function ChatView({ language }) {
     }
   };
 
+  // Confirm-first token flow: the chat proposal never moves money. Confirm
+  // transfer sends the short-lived, one-time, user/action-bound token; Cancel
+  // discards it. Both are validated server-side.
+  const confirmAddMoneyToken = async (confirmationToken) => {
+    if (!confirmationToken || confirmingId) return;
+    setConfirmingId(confirmationToken);
+    setError(null);
+    try {
+      const res = await confirmGoalAddMoneyToken({
+        confirmationToken,
+        idempotencyKey: newIdempotencyKey(),
+        language,
+      });
+      await msgs.refetch();
+      if (res?.reply) {
+        setRich((r) => ({ ...r, [res.reply]: { answer: res.reply } }));
+        setLocal((l) => [...l, { id: `l-${Date.now()}`, user: "Confirm transfer", coach: { answer: res.reply } }]);
+      }
+      refreshAfterGoalMoneyMove();
+    } catch (err) {
+      setError(toApiError(err, "Could not confirm the transfer. No money was moved."));
+    } finally {
+      setConfirmingId(null);
+    }
+  };
+
+  const cancelAddMoneyToken = async (confirmationToken) => {
+    if (!confirmationToken || confirmingId) return;
+    setConfirmingId(confirmationToken);
+    try {
+      await cancelGoalAddMoneyToken({ confirmationToken });
+      await msgs.refetch();
+      setLocal((l) => [...l, { id: `l-${Date.now()}`, user: "Cancel transfer", coach: { answer: "Transfer cancelled. No money was moved." } }]);
+    } catch (err) {
+      setError(toApiError(err, "Could not cancel. No money was moved."));
+    } finally {
+      setConfirmingId(null);
+    }
+  };
+
   const first = (user?.name || "there").split(" ")[0];
   const starters = language === "bn" ? STARTERS.bn : STARTERS.en;
 
@@ -563,7 +637,7 @@ function ChatView({ language }) {
                     </span>
                   </p>
                 ) : null}
-                <Analysis text={m.text} coach={m.coach} goalAction={m.goalAction} onConfirmDelete={confirmDeleteFromChat} confirming={Boolean(confirmingId)} addMoneyAction={m.addMoneyAction} onConfirmAddMoney={m.role === "assistant" ? confirmAddMoneyFromChat(m.text) : undefined} />
+                <Analysis text={m.text} coach={m.coach} goalAction={m.goalAction} onConfirmDelete={confirmDeleteFromChat} confirming={Boolean(confirmingId)} addMoneyAction={m.addMoneyAction} onConfirmAddMoney={m.role === "assistant" ? confirmAddMoneyFromChat(m.text) : undefined} onConfirmAddMoneyToken={confirmAddMoneyToken} onCancelAddMoneyToken={cancelAddMoneyToken} />
               </div>
             </div>
           ),
@@ -850,6 +924,13 @@ function InsightsView() {
             subtitle={live ? "Fresh analysis" : "From last saved forecast"}
           />
           <ForecastSection weeks={rows} />
+          <EvaluationSection
+            evaluation={live?.mlInsights?.evaluation ?? saved?.evaluation ?? null}
+            patternSignals={live?.mlInsights?.patternSignals ?? saved?.patternSignals ?? null}
+            confidence={live?.mlInsights?.confidence ?? null}
+            segment={live?.mlInsights?.segment ?? null}
+            humanReview={live?.mlInsights?.humanReview ?? null}
+          />
           {unusual ? (
             <UnusualExpenses items={unusual} />
           ) : (
@@ -867,8 +948,10 @@ function InsightsView() {
             historicalWeeks={quality?.historicalWeeks ?? null}
             message={quality?.message ?? null}
           />
+          <TrustAndSafety compact />
         </>
       ) : null}
+      <TrustAndSafety compact />
     </div>
   );
 }

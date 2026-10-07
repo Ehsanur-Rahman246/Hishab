@@ -100,12 +100,25 @@ class TransactionIn(BaseModel):
         return v.strip()
 
 
+class FestivalDateIn(BaseModel):
+    """One configurable festival window (YYYY-MM-DD dates)."""
+
+    name: str = Field(default="Festival")
+    start: str = Field(..., description="Window start YYYY-MM-DD.")
+    end: str = Field(..., description="Window end YYYY-MM-DD.")
+
+
 class AnalyzeRequest(BaseModel):
     """Body of POST /analyze-transactions."""
 
     userId: str = Field(..., min_length=1, description="User id from Node backend.")
     transactions: List[TransactionIn] = Field(
         ..., description="List of transactions (must not be empty)."
+    )
+    festivalDates: Optional[List[FestivalDateIn]] = Field(
+        default=None,
+        description="Optional configurable festival calendar override. "
+        "When omitted the maintained Bangladesh default is used.",
     )
 
     @field_validator("userId")
@@ -208,7 +221,12 @@ def analyze_transactions(payload: AnalyzeRequest):
 
     # ML insights (forecast + anomalies + risk) from the same cleaned data.
     # All existing `summary` fields above are unchanged for compatibility.
-    ml_insights = build_ml_insights(df)
+    festival_dates = (
+        [f.model_dump() for f in payload.festivalDates]
+        if payload.festivalDates
+        else None
+    )
+    ml_insights = build_ml_insights(df, festival_dates=festival_dates)
 
     return {
         "success": True,

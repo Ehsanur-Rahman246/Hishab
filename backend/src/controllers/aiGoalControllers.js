@@ -243,11 +243,13 @@ const contributionFailureReply = (err, language) => {
 };
 
 // Shared helper for the coach endpoint. Returns null when the message is not
-// an add-money command.
-export const handleCoachGoalAddMoneyMessage = async ({ userId, message, language, idempotencyKey }) => {
+// an add-money command. CONFIRM-FIRST: a plain chat message NEVER moves
+// money. It returns a read-only proposal (goal, amount, wallet impact,
+// short-lived confirmation token). Money moves only via the explicit
+// POST /api/ai/goals/add-money-confirm-token with that token.
+export const handleCoachGoalAddMoneyMessage = async ({ userId, message, language }) => {
   const intent = parseGoalAddMoneyIntent(message);
   if (!intent) return null;
-  const cleanKey = cleanIdempotencyKey(idempotencyKey);
 
   const goals = await fetchUserGoalsForChat(userId);
   const resolved = resolveGoalFromHint(goals, intent.goalHint);
@@ -300,42 +302,40 @@ export const handleCoachGoalAddMoneyMessage = async ({ userId, message, language
     }
   }
 
-  const outcome = await executeChatContribution({ userId, goal, amount: intent.amount, idempotencyKey: cleanKey });
-  if (!outcome.ok) {
-    const statusCode = outcome.err?.statusCode;
-    const reply = contributionFailureReply(outcome.err, language);
-    await ChatMessage.create({ user: userId, role: "user", text: message });
-    await ChatMessage.create({ user: userId, role: "assistant", text: reply });
-    return { handled: true, added: false, action: "failed", statusCode, goal: publicGoal(goal), reply };
-  }
-
-  const title = outcome.result.goal?.title || goal.title;
-  if (outcome.result.status === "duplicate") {
-    const reply = addedReply(title, Number(outcome.result.transfer?.amount) || intent.amount, language);
+  // Propose only — the LLM / chat text can never invoke a transfer directly.
+  const { proposeGoalContribution } = await import("../services/goalActionProposalService.js");
+  try {
+    const proposal = await proposeGoalContribution({
+      userId,
+      goalId: String(goal._id),
+      amount: intent.amount,
+      conditionThreshold: intent.conditionThreshold,
+    });
+    const reply =
+      language === "bn"
+        ? `নিশ্চিত করুন: “${proposal.goal.title}” goal-এ ৳${Number(proposal.amount).toLocaleString("en-BD")} যোগ হবে। Wallet ৳${Number(proposal.walletImpact.before).toLocaleString("en-BD")} → ৳${Number(proposal.walletImpact.after).toLocaleString("en-BD")}। এখনো কোনো টাকা সরেনি — Confirm transfer চাপুন অথবা Cancel করুন।`
+        : `Please confirm: add ৳${Number(proposal.amount).toLocaleString("en-BD")} to your “${proposal.goal.title}” goal? Wallet ৳${Number(proposal.walletImpact.before).toLocaleString("en-BD")} → ৳${Number(proposal.walletImpact.after).toLocaleString("en-BD")}. No money has moved yet — press Confirm transfer or Cancel.`;
     await ChatMessage.create({ user: userId, role: "user", text: message });
     await ChatMessage.create({ user: userId, role: "assistant", text: reply });
     return {
       handled: true,
-      added: true,
-      action: "duplicate",
-      goalTitle: title,
-      amount: Number(outcome.result.transfer?.amount) || intent.amount,
+      added: false,
+      action: "confirm_required",
+      goal: publicGoal(goal),
+      amount: proposal.amount,
+      conditionThreshold: proposal.conditionThreshold,
+      walletImpact: proposal.walletImpact,
+      confirmationToken: proposal.confirmationToken,
+      expiresAt: proposal.expiresAt,
       reply,
     };
+  } catch (err) {
+    const statusCode = err?.statusCode;
+    const reply = contributionFailureReply(err, language);
+    await ChatMessage.create({ user: userId, role: "user", text: message });
+    await ChatMessage.create({ user: userId, role: "assistant", text: reply });
+    return { handled: true, added: false, action: "failed", statusCode, goal: publicGoal(goal), reply };
   }
-
-  const reply = addedReply(title, intent.amount, language);
-  await ChatMessage.create({ user: userId, role: "user", text: message });
-  await ChatMessage.create({ user: userId, role: "assistant", text: reply });
-  return {
-    handled: true,
-    added: true,
-    action: "added",
-    goalTitle: title,
-    amount: intent.amount,
-    completed: Boolean(outcome.result.completed),
-    reply,
-  };
 };
 
 // POST /api/ai/goals/add-money-confirm — explicit goal choice for an
@@ -415,5 +415,76 @@ export const confirmGoalAddMoney = async (req, res) => {
       success: false,
       message: "Could not add money. No money was moved. Please try again.",
     });
+  }
+};
+
+// POST /api/ai/goals/add-money-propose — read-only proposal for an explicit
+// goal choice (e.g. after an ambiguous chat match). Returns goal, amount,
+// wallet impact + short-lived confirmation token. Moves NO money.
+export const proposeGoalAddMoney = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { goalId: rawId, amount: rawAmount, conditionThreshold: rawThreshold } = req.body ?? {};
+    if (typeof rawId !== "string" || !mongoose.Types.ObjectId.isValid(rawId)) {
+      return res.status(400).json({ success: false, message: "A valid goalId is required." });
+    }
+    const { proposeGoalContribution } = await import("../services/goalActionProposalService.js");
+    const proposal = await proposeGoalContribution({
+      userId, goalId: rawId, amount: rawAmount, conditionThreshold: rawThreshold,
+    });
+    return res.status(200).json({ success: true, ...proposal, confirmationRequired: true });
+  } catch (error) {
+    if (error?.statusCode) return res.status(error.statusCode).json({ success: false, message: error.message });
+    console.error("AI add-money-propose failed:", error?.message || error);
+    return res.status(500).json({ success: false, message: "Could not propose the transfer. No money was moved." });
+  }
+};
+
+// POST /api/ai/goals/add-money-confirm-token — the ONLY chat path that moves
+// money from a proposal. Body: { confirmationToken, idempotencyKey?, language? }.
+// Token is user-bound, action-bound, short-lived, one-time-use, server-validated.
+export const confirmGoalAddMoneyToken = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { confirmationToken, idempotencyKey, language: rawLanguage } = req.body ?? {};
+    const language = cleanLanguage(rawLanguage);
+    const { confirmGoalContribution } = await import("../services/goalActionProposalService.js");
+    const { result } = await confirmGoalContribution({
+      userId, confirmationToken, idempotencyKey: cleanIdempotencyKey(idempotencyKey),
+    });
+    const title = result.goal?.title || "goal";
+    const doneAmount = Number(result.transfer?.amount) || 0;
+    const reply = addedReply(title, doneAmount, language);
+    await ChatMessage.create({ user: userId, role: "assistant", text: reply });
+    return res.status(200).json({
+      success: true,
+      duplicate: result.status === "duplicate",
+      goalTitle: title,
+      amount: doneAmount,
+      completed: Boolean(result.completed),
+      reply,
+    });
+  } catch (error) {
+    if (error?.statusCode) return res.status(error.statusCode).json({ success: false, message: error.message });
+    if (String(error?.message || "").includes("replica set")) {
+      return res.status(503).json({ success: false, message: error.message });
+    }
+    console.error("AI add-money-confirm-token failed:", error?.message || error);
+    return res.status(500).json({ success: false, message: "Could not add money. No money was moved. Please try again." });
+  }
+};
+
+// POST /api/ai/goals/add-money-cancel-token — discard a proposal. Never moves money.
+export const cancelGoalAddMoneyToken = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { confirmationToken } = req.body ?? {};
+    const { cancelGoalContribution } = await import("../services/goalActionProposalService.js");
+    const out = await cancelGoalContribution({ userId, confirmationToken });
+    await ChatMessage.create({ user: userId, role: "assistant", text: `Transfer to “${out.goalTitle}” cancelled. No money was moved.` });
+    return res.status(200).json({ success: true, ...out });
+  } catch (error) {
+    if (error?.statusCode) return res.status(error.statusCode).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: "Could not cancel. No money was moved." });
   }
 };

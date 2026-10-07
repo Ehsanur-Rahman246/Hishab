@@ -7,6 +7,7 @@ import GoalTransfer from "../models/GoalTransfer.js";
 import ChatMessage from "../models/ChatMessage.js";
 import {
   COACH_REQUEST_LANGUAGES,
+  applyNumericGroundingGuard,
   generateCoachReply,
   parseAndValidateCoachJson,
 } from "../services/groqCoachService.js";
@@ -202,6 +203,23 @@ export const analyzeTransactions = async (req, res) => {
       const horizonWeeks = Number.isFinite(Number(forecast?.horizonWeeks))
         ? Number(forecast.horizonWeeks)
         : weeks.length;
+      // New reliability metadata (kept as-is from the ML service; may be
+      // null for older service versions). Plain objects only.
+      const evaluation =
+        analysis?.mlInsights?.evaluation &&
+        typeof analysis.mlInsights.evaluation === "object"
+          ? analysis.mlInsights.evaluation
+          : null;
+      const patternSignals =
+        analysis?.mlInsights?.patternSignals &&
+        typeof analysis.mlInsights.patternSignals === "object"
+          ? analysis.mlInsights.patternSignals
+          : null;
+      const forecastEvaluation =
+        analysis?.mlInsights?.forecastEvaluation &&
+        typeof analysis.mlInsights.forecastEvaluation === "object"
+          ? analysis.mlInsights.forecastEvaluation
+          : null;
 
       // Deduplication: refresh a snapshot made minutes ago for this user
       // instead of stacking duplicates. Historical snapshots are kept.
@@ -218,6 +236,9 @@ export const analyzeTransactions = async (req, res) => {
         recent.weeks = weeks;
         recent.modelUsed = modelUsed;
         recent.horizonWeeks = horizonWeeks;
+        recent.evaluation = evaluation;
+        recent.patternSignals = patternSignals;
+        recent.forecastEvaluation = forecastEvaluation;
         recent.generatedAt = new Date();
         snapshot = await recent.save();
       } else {
@@ -226,6 +247,9 @@ export const analyzeTransactions = async (req, res) => {
           modelUsed,
           horizonWeeks,
           weeks,
+          evaluation,
+          patternSignals,
+          forecastEvaluation,
         });
       }
 
@@ -645,17 +669,17 @@ export const askCoach = async (req, res) => {
       });
     }
 
-    // Goal add-money via chat: deterministic, JWT-scoped, direct execution
-    // for explicit goal + amount. Handled before any LLM call — the model
-    // never picks IDs or moves money. Ambiguous/no-match/failed conditions
-    // never move money.
+    // Goal add-money via chat: deterministic, JWT-scoped, CONFIRM-FIRST.
+    // A plain chat message only PROPOSES (read-only: goal, amount, wallet
+    // impact, short-lived confirmation token). Money moves solely via the
+    // explicit confirm-token endpoint. Handled before any LLM call — the
+    // model never picks IDs or moves money.
     try {
       const { handleCoachGoalAddMoneyMessage } = await import("./aiGoalControllers.js");
       const addMoney = await handleCoachGoalAddMoneyMessage({
         userId,
         message,
         language,
-        idempotencyKey: typeof rawKey === "string" ? rawKey : undefined,
       });
       if (addMoney?.handled) {
         if (addMoney.added) {
@@ -688,10 +712,13 @@ export const askCoach = async (req, res) => {
             matches: addMoney.matches,
             amount: addMoney.amount,
             conditionThreshold: addMoney.conditionThreshold,
+            confirmationToken: addMoney.confirmationToken,
+            expiresAt: addMoney.expiresAt,
+            walletImpact: addMoney.walletImpact,
           },
           coach: {
             language: language === "bn" ? "bn" : language === "en" ? "en" : "mixed",
-            headline: "Add money to goal",
+            headline: addMoney.action === "confirm_required" ? "Confirm transfer" : "Add money to goal",
             answer: addMoney.reply,
             actions: [],
             tone: "caution",
@@ -775,16 +802,29 @@ export const askCoach = async (req, res) => {
       });
     }
 
+    // Runtime numerical-grounding guard: figures not derivable from the
+    // trusted context get an explicit caution (never silent trust).
+    const { coach: guardedCoach, numericGrounding } =
+      applyNumericGroundingGuard(checked.coach, context);
+    if (numericGrounding.unsupportedClaims?.length > 0) {
+      console.error(
+        "Coach reply contained unverifiable figures:",
+        numericGrounding.unsupportedClaims.join(", "),
+      );
+    }
+
     // Save history only after successful validation, for this user only.
     // Only the two message texts are stored — never keys, context, or prompts.
     await ChatMessage.create({ user: userId, role: "user", text: message });
     await ChatMessage.create({
       user: userId,
       role: "assistant",
-      text: checked.coach.answer,
+      text: guardedCoach.answer,
     });
 
-    return res.status(200).json({ success: true, coach: checked.coach });
+    return res
+      .status(200)
+      .json({ success: true, coach: guardedCoach, numericGrounding });
   } catch (error) {
     console.error(error);
 
