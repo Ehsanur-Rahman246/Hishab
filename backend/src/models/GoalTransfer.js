@@ -51,7 +51,6 @@ const goalTransferSchema = new mongoose.Schema(
     // cycleKey instead), so the index below is sparse.
     idempotencyKey: {
       type: String,
-      default: null,
       trim: true,
       maxlength: 100,
     },
@@ -68,7 +67,12 @@ goalTransferSchema.index(
 goalTransferSchema.index({ user: 1, createdAt: -1 });
 goalTransferSchema.index(
   { user: 1, idempotencyKey: 1 },
-  { unique: true, sparse: true },
+  {
+    unique: true,
+    partialFilterExpression: {
+      idempotencyKey: { $type: "string" },
+    },
+  },
 );
 
 const GoalTransfer = mongoose.model("GoalTransfer", goalTransferSchema);

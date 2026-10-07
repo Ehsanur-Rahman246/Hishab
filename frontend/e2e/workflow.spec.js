@@ -11,7 +11,7 @@ if (!DEMO_PHONE || !DEMO_PIN || !DEMO_GOAL_TITLE) {
   );
 }
 
-// Parses displayed amounts such as "৳30,500".
+// Parses formatted amounts such as "৳30,500".
 const num = (value) => Number(value.replace(/[^\d.-]/g, ""));
 
 async function readJson(response, label) {
@@ -59,8 +59,8 @@ test("sign in, forecast, chat, and contribute once", async ({ page }) => {
 
   await expect(page).toHaveURL(/dashboard/);
 
-  // Read a stable starting point after authentication. The API request shares
-  // the browser context's cookies, so it uses the same logged-in session.
+  // Use API values for the baseline so UI loading placeholders can't be
+  // mistaken for the real starting balances.
   const walletResponse = await page.request.get(`${API}/api/wallet`);
   const { wallet } = await readJson(walletResponse, "Read starting wallet");
 
@@ -75,7 +75,7 @@ test("sign in, forecast, chat, and contribute once", async ({ page }) => {
   const remainingBefore = Number(goal.targetAmount) - savedBefore;
 
   expect(walletBefore).toBeGreaterThanOrEqual(750);
-  expect(remainingBefore).toBeGreaterThanOrEqual(750);
+  expect(remainingBefore).toBeGreaterThan(750);
 
   // Forecast workflow.
   await page.goto("/forecast");
@@ -85,6 +85,7 @@ test("sign in, forecast, chat, and contribute once", async ({ page }) => {
   await page.goto("/ai-assistant");
   await page.getByLabel(/your question/i).fill("Where am I spending the most?");
   await page.getByRole("button", { name: /send question/i }).click();
+
   await expect(page.getByTestId("coach-reply").last()).not.toBeEmpty({
     timeout: 45_000,
   });
@@ -105,26 +106,30 @@ test("sign in, forecast, chat, and contribute once", async ({ page }) => {
     .poll(async () => num(await card.getByTestId("goal-saved").innerText()))
     .toBe(savedBefore + 500);
 
-  // Retry one API contribution using the same idempotency key.
+  // Direct API mutations need the same double-submit CSRF token as the app.
+  const csrfResponse = await page.request.get(`${API}/api/auth/csrf-token`);
+  const { csrfToken } = await readJson(csrfResponse, "Get CSRF token");
+  const csrfHeaders = { "x-csrf-token": csrfToken };
+
+  // Retry the same contribution with the same key; it must only move funds once.
   const body = { amount: 250, idempotencyKey: randomUUID() };
 
   const firstResponse = await page.request.post(
     `${API}/api/goals/${goal._id}/add-savings`,
-    { data: body },
+    { data: body, headers: csrfHeaders },
   );
   const first = await readJson(firstResponse, "First contribution request");
 
   const retryResponse = await page.request.post(
     `${API}/api/goals/${goal._id}/add-savings`,
-    { data: body },
+    { data: body, headers: csrfHeaders },
   );
   const retry = await readJson(retryResponse, "Contribution retry");
 
   expect(first.duplicate).toBeUndefined();
   expect(retry.duplicate).toBe(true);
 
-  // Verify final API state: the UI contribution and the first API request
-  // moved money; the retry did not.
+  // Verify final state: 500 via UI + 250 via API; retry moved nothing.
   const finalWalletResponse = await page.request.get(`${API}/api/wallet`);
   const { wallet: finalWallet } = await readJson(
     finalWalletResponse,

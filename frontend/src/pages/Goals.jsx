@@ -1413,11 +1413,15 @@ function AddMoneyForm({ goal, onDone }) {
             toast.info(msg);
             return;
           }
-          if (res?.goal?.status === "completed")
+          if (res?.goal?.status === "released") {
             toast.success(
-              `You reached "${goal.title}"! ${money(value)} moved to the goal.`,
+              `${goal.title} completed. ${money(res.goal.releasedAmount)} returned to your wallet.`,
             );
-          else toast.success(`${money(value)} added to ${goal.title}`);
+          } else if (res?.goal?.status === "completed") {
+            toast.success(`You reached "${goal.title}"!`);
+          } else {
+            toast.success(`${money(value)} added to ${goal.title}`);
+          }
           onDone();
         },
         onError: (err) =>

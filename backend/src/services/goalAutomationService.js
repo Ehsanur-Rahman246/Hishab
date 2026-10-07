@@ -94,7 +94,7 @@ const isTxUnsupportedError = (err) => {
 
 const toConfigError = () =>
   new Error(
-    "MongoDB replica set is required for safe automatic goal transfers."
+    "MongoDB replica set is required for safe automatic goal transfers.",
   );
 
 // Run fn(session) inside a transaction. Never falls back to non-atomic
@@ -117,17 +117,24 @@ const withAutomationSession = async (fn) => {
 };
 
 const isDuplicateKey = (err) =>
-  err?.code === 11000 ||
-  String(err?.message || "").includes("duplicate key");
+  err?.code === 11000 || String(err?.message || "").includes("duplicate key");
 
 // --- single contribution (one MongoDB transaction) -------------------------
 
-const executeContribution = async ({ userId, goalId, cycleKey, plannedAmount }) => {
+const executeContribution = async ({
+  userId,
+  goalId,
+  cycleKey,
+  plannedAmount,
+}) => {
   try {
     return await withAutomationSession(async (session) => {
-      const goal = await Goal.findOne({ _id: goalId, user: userId }).session(session);
+      const goal = await Goal.findOne({ _id: goalId, user: userId }).session(
+        session,
+      );
       if (!goal) return { status: "skipped", reason: "goal_not_found" };
-      if (goal.status !== "active") return { status: "skipped", reason: `status_${goal.status}` };
+      if (goal.status !== "active")
+        return { status: "skipped", reason: `status_${goal.status}` };
       if (!goal.automation?.enabled || goal.automation?.paused)
         return { status: "skipped", reason: "automation_off" };
       if (goal.automation.lastProcessedCycle === cycleKey)
@@ -145,7 +152,7 @@ const executeContribution = async ({ userId, goalId, cycleKey, plannedAmount }) 
         await Goal.updateOne(
           { _id: goalId },
           { $set: { "automation.lastProcessedCycle": cycleKey } },
-          { session }
+          { session },
         );
         return { status: "duplicate", reason: "ledger_exists" };
       }
@@ -157,10 +164,14 @@ const executeContribution = async ({ userId, goalId, cycleKey, plannedAmount }) 
       if (!isValidPercentage(pct))
         return { status: "skipped", reason: "invalid_percentage" };
 
-      const remaining = round2(Number(goal.targetAmount) - Number(goal.savedAmount));
-      if (remaining <= 0) return { status: "skipped", reason: "target_reached" };
+      const remaining = round2(
+        Number(goal.targetAmount) - Number(goal.savedAmount),
+      );
+      if (remaining <= 0)
+        return { status: "skipped", reason: "target_reached" };
       const amount = round2(Math.min(planned, remaining));
-      if (amount <= 0) return { status: "skipped", reason: "zero_contribution" };
+      if (amount <= 0)
+        return { status: "skipped", reason: "zero_contribution" };
 
       const wallet = await Wallet.findOne({ user: userId }).session(session);
       if (!wallet) return { status: "skipped", reason: "wallet_not_found" };
@@ -171,7 +182,7 @@ const executeContribution = async ({ userId, goalId, cycleKey, plannedAmount }) 
       const wRes = await Wallet.updateOne(
         { _id: wallet._id, balance: { $gte: amount } },
         { $inc: { balance: -amount } },
-        { session }
+        { session },
       );
       if (wRes.modifiedCount !== 1)
         return { status: "skipped", reason: "insufficient_funds" };
@@ -188,7 +199,9 @@ const executeContribution = async ({ userId, goalId, cycleKey, plannedAmount }) 
         goalUpdate.$set.completedAt = new Date();
         goalUpdate.$set["automation.enabled"] = false;
       }
-      await Goal.updateOne({ _id: goalId, status: "active" }, goalUpdate, { session });
+      await Goal.updateOne({ _id: goalId, status: "active" }, goalUpdate, {
+        session,
+      });
 
       await GoalTransfer.create(
         [
@@ -202,7 +215,7 @@ const executeContribution = async ({ userId, goalId, cycleKey, plannedAmount }) 
             walletBalanceAfter: after,
           },
         ],
-        { session }
+        { session },
       );
 
       await Transaction.create(
@@ -216,8 +229,19 @@ const executeContribution = async ({ userId, goalId, cycleKey, plannedAmount }) 
             description: `Automatic savings transfer to goal: ${goal.title}`,
           },
         ],
-        { session }
+        { session },
       );
+
+      if (completes) {
+        await releaseCompletedGoal({
+          userId,
+          goal,
+          wallet,
+          amount: newSaved,
+          walletBalanceBefore: after,
+          session,
+        });
+      }
 
       return {
         status: "contributed",
@@ -229,7 +253,8 @@ const executeContribution = async ({ userId, goalId, cycleKey, plannedAmount }) 
       };
     });
   } catch (err) {
-    if (isDuplicateKey(err)) return { status: "duplicate", reason: "ledger_race" };
+    if (isDuplicateKey(err))
+      return { status: "duplicate", reason: "ledger_race" };
     throw err;
   }
 };
@@ -249,7 +274,12 @@ const codedError = (message, statusCode) => {
   return err;
 };
 
-export const executeManualContribution = async ({ userId, goalId, amount, idempotencyKey }) => {
+export const executeManualContribution = async ({
+  userId,
+  goalId,
+  amount,
+  idempotencyKey,
+}) => {
   const value = round2(Number(amount));
   if (!Number.isFinite(value) || value <= 0) {
     throw codedError("Amount must be greater than 0.", 400);
@@ -262,7 +292,10 @@ export const executeManualContribution = async ({ userId, goalId, amount, idempo
   // Fast path outside the transaction: an already-processed retry returns
   // its original result without touching balances.
   if (cleanKey) {
-    const prior = await GoalTransfer.findOne({ user: userId, idempotencyKey: cleanKey }).lean();
+    const prior = await GoalTransfer.findOne({
+      user: userId,
+      idempotencyKey: cleanKey,
+    }).lean();
     if (prior) {
       const goal = await Goal.findOne({ _id: goalId, user: userId }).lean();
       return { status: "duplicate", transfer: prior, goal };
@@ -273,25 +306,34 @@ export const executeManualContribution = async ({ userId, goalId, amount, idempo
     return await withAutomationSession(async (session) => {
       // Same check inside the transaction so concurrent retries serialize.
       if (cleanKey) {
-        const prior = await GoalTransfer.findOne({ user: userId, idempotencyKey: cleanKey })
+        const prior = await GoalTransfer.findOne({
+          user: userId,
+          idempotencyKey: cleanKey,
+        })
           .session(session)
           .lean();
         if (prior) {
-          const goal = await Goal.findOne({ _id: goalId, user: userId }).session(session).lean();
+          const goal = await Goal.findOne({ _id: goalId, user: userId })
+            .session(session)
+            .lean();
           return { status: "duplicate", transfer: prior, goal };
         }
       }
 
-      const goal = await Goal.findOne({ _id: goalId, user: userId }).session(session);
+      const goal = await Goal.findOne({ _id: goalId, user: userId }).session(
+        session,
+      );
       if (!goal) throw codedError("Goal not found.", 404);
       if (goal.status !== "active")
         throw codedError("Savings can only be added to an active goal.", 400);
 
-      const remaining = round2(Number(goal.targetAmount) - Number(goal.savedAmount));
+      const remaining = round2(
+        Number(goal.targetAmount) - Number(goal.savedAmount),
+      );
       if (value > remaining)
         throw codedError(
           `Amount exceeds the remaining target. Only ${remaining} still needed.`,
-          400
+          400,
         );
 
       const wallet = await Wallet.findOne({ user: userId }).session(session);
@@ -303,7 +345,7 @@ export const executeManualContribution = async ({ userId, goalId, amount, idempo
       const wRes = await Wallet.updateOne(
         { _id: wallet._id, balance: { $gte: value } },
         { $inc: { balance: -value } },
-        { session }
+        { session },
       );
       if (wRes.modifiedCount !== 1)
         throw codedError("Insufficient wallet balance for this transfer.", 400);
@@ -317,7 +359,9 @@ export const executeManualContribution = async ({ userId, goalId, amount, idempo
         goalUpdate.$set.completedAt = new Date();
         goalUpdate.$set["automation.enabled"] = false;
       }
-      await Goal.updateOne({ _id: goalId, status: "active" }, goalUpdate, { session });
+      await Goal.updateOne({ _id: goalId, status: "active" }, goalUpdate, {
+        session,
+      });
 
       // Unique per transfer attempt so the (user, goal, type, cycleKey)
       // index never collides across separate manual transfers. Retried
@@ -338,7 +382,7 @@ export const executeManualContribution = async ({ userId, goalId, amount, idempo
             ...(cleanKey ? { idempotencyKey: cleanKey } : {}),
           },
         ],
-        { session }
+        { session },
       );
 
       await Transaction.create(
@@ -352,16 +396,37 @@ export const executeManualContribution = async ({ userId, goalId, amount, idempo
             description: `Manual savings transfer to goal: ${goal.title}`,
           },
         ],
-        { session }
+        { session },
       );
 
-      const updatedGoal = await Goal.findOne({ _id: goalId }).session(session).lean();
-      return { status: "contributed", transfer: transfer.toObject(), goal: updatedGoal, completed: completes };
+      if (completes) {
+        await releaseCompletedGoal({
+          userId,
+          goal,
+          wallet,
+          amount: newSaved,
+          walletBalanceBefore: after,
+          session,
+        });
+      }
+
+      const updatedGoal = await Goal.findOne({ _id: goalId })
+        .session(session)
+        .lean();
+      return {
+        status: "contributed",
+        transfer: transfer.toObject(),
+        goal: updatedGoal,
+        completed: completes,
+      };
     });
   } catch (err) {
     // Lost the index race with a concurrent retry: return the winner's row.
     if (isDuplicateKey(err) && cleanKey) {
-      const prior = await GoalTransfer.findOne({ user: userId, idempotencyKey: cleanKey }).lean();
+      const prior = await GoalTransfer.findOne({
+        user: userId,
+        idempotencyKey: cleanKey,
+      }).lean();
       if (prior) {
         const goal = await Goal.findOne({ _id: goalId, user: userId }).lean();
         return { status: "duplicate", transfer: prior, goal };
@@ -376,7 +441,9 @@ export const executeManualContribution = async ({ userId, goalId, amount, idempo
 const executeRelease = async ({ userId, goalId, now = new Date() }) => {
   try {
     return await withAutomationSession(async (session) => {
-      const goal = await Goal.findOne({ _id: goalId, user: userId }).session(session);
+      const goal = await Goal.findOne({ _id: goalId, user: userId }).session(
+        session,
+      );
       if (!goal) return { status: "skipped", reason: "goal_not_found" };
       if (goal.status === "released" || goal.status === "cancelled")
         return { status: "skipped", reason: `status_${goal.status}` };
@@ -409,9 +476,15 @@ const executeRelease = async ({ userId, goalId, now = new Date() }) => {
               "automation.enabled": false,
             },
           },
-          { session }
+          { session },
         );
-        return { status: "released", goalId: String(goalId), title: goal.title, amount: 0, cycleKey };
+        return {
+          status: "released",
+          goalId: String(goalId),
+          title: goal.title,
+          amount: 0,
+          cycleKey,
+        };
       }
 
       const dup = await GoalTransfer.findOne({
@@ -432,7 +505,7 @@ const executeRelease = async ({ userId, goalId, now = new Date() }) => {
               "automation.enabled": false,
             },
           },
-          { session }
+          { session },
         );
         return { status: "duplicate", reason: "ledger_exists" };
       }
@@ -448,7 +521,7 @@ const executeRelease = async ({ userId, goalId, now = new Date() }) => {
         await Goal.updateOne(
           { _id: goalId },
           { $set: { status: "released", "automation.enabled": false } },
-          { session }
+          { session },
         );
         return { status: "duplicate", reason: "already_released" };
       }
@@ -456,7 +529,11 @@ const executeRelease = async ({ userId, goalId, now = new Date() }) => {
       const wallet = await Wallet.findOne({ user: userId }).session(session);
       if (!wallet) return { status: "skipped", reason: "wallet_not_found" };
       const before = round2(Number(wallet.balance));
-      await Wallet.updateOne({ _id: wallet._id }, { $inc: { balance: amount } }, { session });
+      await Wallet.updateOne(
+        { _id: wallet._id },
+        { $inc: { balance: amount } },
+        { session },
+      );
       const after = round2(before + amount);
 
       await Goal.updateOne(
@@ -469,7 +546,7 @@ const executeRelease = async ({ userId, goalId, now = new Date() }) => {
             "automation.enabled": false,
           },
         },
-        { session }
+        { session },
       );
 
       await GoalTransfer.create(
@@ -484,7 +561,7 @@ const executeRelease = async ({ userId, goalId, now = new Date() }) => {
             walletBalanceAfter: after,
           },
         ],
-        { session }
+        { session },
       );
 
       await Transaction.create(
@@ -498,7 +575,7 @@ const executeRelease = async ({ userId, goalId, now = new Date() }) => {
             description: `Goal funds released to wallet: ${goal.title}`,
           },
         ],
-        { session }
+        { session },
       );
 
       // Deduplicated in-app notification (upsert, never twice).
@@ -518,13 +595,20 @@ const executeRelease = async ({ userId, goalId, now = new Date() }) => {
             dedupeKey: alertKey,
           },
         },
-        { upsert: true, session }
+        { upsert: true, session },
       );
 
-      return { status: "released", goalId: String(goalId), title: goal.title, amount, cycleKey };
+      return {
+        status: "released",
+        goalId: String(goalId),
+        title: goal.title,
+        amount,
+        cycleKey,
+      };
     });
   } catch (err) {
-    if (isDuplicateKey(err)) return { status: "duplicate", reason: "ledger_race" };
+    if (isDuplicateKey(err))
+      return { status: "duplicate", reason: "ledger_race" };
     throw err;
   }
 };
@@ -541,7 +625,11 @@ const executeRelease = async ({ userId, goalId, now = new Date() }) => {
 // without a second refund, preventing delete-vs-release double refunds.
 export const cancelCycleKeyForGoal = (goalId) => `cancel:${String(goalId)}`;
 
-export const executeGoalDeletion = async ({ userId, goalId, idempotencyKey }) => {
+export const executeGoalDeletion = async ({
+  userId,
+  goalId,
+  idempotencyKey,
+}) => {
   const cleanKey =
     typeof idempotencyKey === "string" && idempotencyKey.trim()
       ? idempotencyKey.trim().slice(0, 100)
@@ -550,7 +638,10 @@ export const executeGoalDeletion = async ({ userId, goalId, idempotencyKey }) =>
   // Fast path: explicit retry with the same idempotencyKey returns the
   // original refund without touching balances.
   if (cleanKey) {
-    const prior = await GoalTransfer.findOne({ user: userId, idempotencyKey: cleanKey }).lean();
+    const prior = await GoalTransfer.findOne({
+      user: userId,
+      idempotencyKey: cleanKey,
+    }).lean();
     if (prior) {
       return {
         status: "duplicate",
@@ -569,7 +660,9 @@ export const executeGoalDeletion = async ({ userId, goalId, idempotencyKey }) =>
       type: "goal_cancelled_refund",
     }).lean();
     if (priorCancel) {
-      const goalStillThere = await Goal.findOne({ _id: goalId, user: userId }).select("_id").lean();
+      const goalStillThere = await Goal.findOne({ _id: goalId, user: userId })
+        .select("_id")
+        .lean();
       if (!goalStillThere) {
         return {
           status: "duplicate",
@@ -584,7 +677,10 @@ export const executeGoalDeletion = async ({ userId, goalId, idempotencyKey }) =>
   try {
     return await withAutomationSession(async (session) => {
       if (cleanKey) {
-        const prior = await GoalTransfer.findOne({ user: userId, idempotencyKey: cleanKey })
+        const prior = await GoalTransfer.findOne({
+          user: userId,
+          idempotencyKey: cleanKey,
+        })
           .session(session)
           .lean();
         if (prior) {
@@ -597,7 +693,9 @@ export const executeGoalDeletion = async ({ userId, goalId, idempotencyKey }) =>
         }
       }
 
-      const goal = await Goal.findOne({ _id: goalId, user: userId }).session(session);
+      const goal = await Goal.findOne({ _id: goalId, user: userId }).session(
+        session,
+      );
       if (!goal) {
         // Goal already gone: if a cancel refund exists, this is a retry.
         const priorCancel = await GoalTransfer.findOne({
@@ -655,13 +753,24 @@ export const executeGoalDeletion = async ({ userId, goalId, idempotencyKey }) =>
         .lean();
       if (existingRelease || goal.status === "released") {
         await Goal.deleteOne({ _id: goalId, user: userId }).session(session);
-        return { status: "deleted", goalId: String(goalId), title, refundedAmount: 0, alreadyReleased: true };
+        return {
+          status: "deleted",
+          goalId: String(goalId),
+          title,
+          refundedAmount: 0,
+          alreadyReleased: true,
+        };
       }
 
       if (!(amount > 0)) {
         // Zero-balance goal: no money movement, no ledger/transaction rows.
         await Goal.deleteOne({ _id: goalId, user: userId }).session(session);
-        return { status: "deleted", goalId: String(goalId), title, refundedAmount: 0 };
+        return {
+          status: "deleted",
+          goalId: String(goalId),
+          title,
+          refundedAmount: 0,
+        };
       }
 
       const wallet = await Wallet.findOne({ user: userId }).session(session);
@@ -671,7 +780,11 @@ export const executeGoalDeletion = async ({ userId, goalId, idempotencyKey }) =>
         throw err;
       }
       const before = round2(Number(wallet.balance));
-      await Wallet.updateOne({ _id: wallet._id }, { $inc: { balance: amount } }, { session });
+      await Wallet.updateOne(
+        { _id: wallet._id },
+        { $inc: { balance: amount } },
+        { session },
+      );
       const after = round2(before + amount);
 
       const [transfer] = await GoalTransfer.create(
@@ -687,7 +800,7 @@ export const executeGoalDeletion = async ({ userId, goalId, idempotencyKey }) =>
             ...(cleanKey ? { idempotencyKey: cleanKey } : {}),
           },
         ],
-        { session }
+        { session },
       );
 
       await Transaction.create(
@@ -701,7 +814,7 @@ export const executeGoalDeletion = async ({ userId, goalId, idempotencyKey }) =>
             description: `Goal cancelled and funds returned to wallet: ${title}`,
           },
         ],
-        { session }
+        { session },
       );
 
       // Deduplicated in-app notification (upsert, never twice).
@@ -721,7 +834,7 @@ export const executeGoalDeletion = async ({ userId, goalId, idempotencyKey }) =>
             dedupeKey: alertKey,
           },
         },
-        { upsert: true, session }
+        { upsert: true, session },
       );
 
       // Automation dies with the goal: deleting the row guarantees no future
@@ -741,8 +854,15 @@ export const executeGoalDeletion = async ({ userId, goalId, idempotencyKey }) =>
     // winner's row instead of refunding again.
     if (isDuplicateKey(err)) {
       const winner = cleanKey
-        ? await GoalTransfer.findOne({ user: userId, idempotencyKey: cleanKey }).lean()
-        : await GoalTransfer.findOne({ user: userId, goal: goalId, type: "goal_cancelled_refund" }).lean();
+        ? await GoalTransfer.findOne({
+            user: userId,
+            idempotencyKey: cleanKey,
+          }).lean()
+        : await GoalTransfer.findOne({
+            user: userId,
+            goal: goalId,
+            type: "goal_cancelled_refund",
+          }).lean();
       if (winner) {
         return {
           status: "duplicate",
@@ -761,15 +881,23 @@ export const executeGoalDeletion = async ({ userId, goalId, idempotencyKey }) =>
 // Priority order: ascending priority (1 first), oldest first on ties.
 export const processAutoContributionsForUser = async (
   userId,
-  { weeklyCycleKey, monthlyCycleKey } = {}
+  { weeklyCycleKey, monthlyCycleKey } = {},
 ) => {
   const now = new Date();
   const keys = currentCycleKeys(now);
   const weekly = weeklyCycleKey || keys.weekly;
   const monthly = monthlyCycleKey || keys.monthly;
 
-  const wallet = await Wallet.findOne({ user: userId }).select("balance").lean();
-  if (!wallet) return { weeklyCycleKey: weekly, monthlyCycleKey: monthly, results: [], skipped: "wallet_not_found" };
+  const wallet = await Wallet.findOne({ user: userId })
+    .select("balance")
+    .lean();
+  if (!wallet)
+    return {
+      weeklyCycleKey: weekly,
+      monthlyCycleKey: monthly,
+      results: [],
+      skipped: "wallet_not_found",
+    };
   const initialBalance = round2(Number(wallet.balance) || 0);
 
   const goals = await Goal.find({
@@ -789,22 +917,46 @@ export const processAutoContributionsForUser = async (
     if (freq !== "weekly" && freq !== "monthly") continue;
     const cycleKey = freq === "weekly" ? weekly : monthly;
     if (g.automation?.lastProcessedCycle === cycleKey) {
-      results.push({ goalId: String(g._id), title: g.title, status: "duplicate", reason: "already_processed", cycleKey });
+      results.push({
+        goalId: String(g._id),
+        title: g.title,
+        status: "duplicate",
+        reason: "already_processed",
+        cycleKey,
+      });
       continue;
     }
     const pct = Number(g.automation?.percentage);
     if (!isValidPercentage(pct)) {
-      results.push({ goalId: String(g._id), title: g.title, status: "skipped", reason: "invalid_percentage", cycleKey });
+      results.push({
+        goalId: String(g._id),
+        title: g.title,
+        status: "skipped",
+        reason: "invalid_percentage",
+        cycleKey,
+      });
       continue;
     }
     const planned = round2((initialBalance * pct) / 100);
     if (!(planned > 0)) {
-      results.push({ goalId: String(g._id), title: g.title, status: "skipped", reason: "zero_planned", cycleKey });
+      results.push({
+        goalId: String(g._id),
+        title: g.title,
+        status: "skipped",
+        reason: "zero_planned",
+        cycleKey,
+      });
       continue;
     }
     const remaining = round2(Number(g.targetAmount) - Number(g.savedAmount));
     if (remaining <= 0) {
-      results.push({ goalId: String(g._id), title: g.title, status: "skipped", reason: "target_reached", cycleKey });
+      results.push({
+        goalId: String(g._id),
+        title: g.title,
+        status: "skipped",
+        reason: "target_reached",
+        cycleKey,
+      });
       continue;
     }
     const contribution = round2(Math.min(planned, remaining));
@@ -824,12 +976,23 @@ export const processAutoContributionsForUser = async (
       continue;
     }
 
-    const outcome = await executeContribution({ userId, goalId: g._id, cycleKey, plannedAmount: planned });
-    if (outcome.status === "contributed") available = round2(available - outcome.amount);
+    const outcome = await executeContribution({
+      userId,
+      goalId: g._id,
+      cycleKey,
+      plannedAmount: planned,
+    });
+    if (outcome.status === "contributed")
+      available = round2(available - outcome.amount);
     results.push({ ...outcome, cycleKey, plannedAmount: planned });
   }
 
-  return { weeklyCycleKey: weekly, monthlyCycleKey: monthly, initialWalletBalance: initialBalance, results };
+  return {
+    weeklyCycleKey: weekly,
+    monthlyCycleKey: monthly,
+    initialWalletBalance: initialBalance,
+    results,
+  };
 };
 
 export const processReleasesForUser = async (userId, now = new Date()) => {
@@ -850,14 +1013,18 @@ export const processReleasesForUser = async (userId, now = new Date()) => {
 
 // Demo/test entry point: releases + the currently-due cycle for one user.
 export const runDueAutomationForUser = async (userId, now = new Date()) => {
-  const walletBefore = await Wallet.findOne({ user: userId }).select("balance").lean();
+  const walletBefore = await Wallet.findOne({ user: userId })
+    .select("balance")
+    .lean();
   const releases = await processReleasesForUser(userId, now);
   const keys = currentCycleKeys(now);
   const contributions = await processAutoContributionsForUser(userId, {
     weeklyCycleKey: keys.weekly,
     monthlyCycleKey: keys.monthly,
   });
-  const walletAfter = await Wallet.findOne({ user: userId }).select("balance").lean();
+  const walletAfter = await Wallet.findOne({ user: userId })
+    .select("balance")
+    .lean();
   return {
     dhakaDate: keys.dhakaDate,
     weeklyCycleKey: keys.weekly,
@@ -885,10 +1052,19 @@ const distinctAutomationUsers = async (frequency) => {
 
 export const runWeeklyCycleForAllUsers = async (cycleKey, now = new Date()) => {
   const users = await distinctAutomationUsers("weekly");
-  const summary = { cycleKey, processedUsers: 0, contributed: 0, skipped: 0, duplicates: 0, errors: [] };
+  const summary = {
+    cycleKey,
+    processedUsers: 0,
+    contributed: 0,
+    skipped: 0,
+    duplicates: 0,
+    errors: [],
+  };
   for (const uid of users) {
     try {
-      const wallet = await Wallet.findOne({ user: uid }).select("balance").lean();
+      const wallet = await Wallet.findOne({ user: uid })
+        .select("balance")
+        .lean();
       if (!wallet) continue;
       const initialBalance = round2(Number(wallet.balance) || 0);
       let available = initialBalance;
@@ -903,24 +1079,55 @@ export const runWeeklyCycleForAllUsers = async (cycleKey, now = new Date()) => {
         .lean();
       summary.processedUsers += 1;
       for (const g of goals) {
-        if (g.automation?.lastProcessedCycle === cycleKey) { summary.duplicates += 1; continue; }
+        if (g.automation?.lastProcessedCycle === cycleKey) {
+          summary.duplicates += 1;
+          continue;
+        }
         const pct = Number(g.automation?.percentage);
-        if (!isValidPercentage(pct)) { summary.skipped += 1; continue; }
+        if (!isValidPercentage(pct)) {
+          summary.skipped += 1;
+          continue;
+        }
         const planned = round2((initialBalance * pct) / 100);
-        if (!(planned > 0)) { summary.skipped += 1; continue; }
-        const remaining = round2(Number(g.targetAmount) - Number(g.savedAmount));
-        if (remaining <= 0) { summary.skipped += 1; continue; }
+        if (!(planned > 0)) {
+          summary.skipped += 1;
+          continue;
+        }
+        const remaining = round2(
+          Number(g.targetAmount) - Number(g.savedAmount),
+        );
+        if (remaining <= 0) {
+          summary.skipped += 1;
+          continue;
+        }
         const contribution = round2(Math.min(planned, remaining));
-        if (contribution > available) { summary.skipped += 1; continue; }
-        const outcome = await executeContribution({ userId: uid, goalId: g._id, cycleKey, plannedAmount: planned });
-        if (outcome.status === "contributed") { summary.contributed += 1; available = round2(available - outcome.amount); }
-        else if (outcome.status === "duplicate") summary.duplicates += 1;
+        if (contribution > available) {
+          summary.skipped += 1;
+          continue;
+        }
+        const outcome = await executeContribution({
+          userId: uid,
+          goalId: g._id,
+          cycleKey,
+          plannedAmount: planned,
+        });
+        if (outcome.status === "contributed") {
+          summary.contributed += 1;
+          available = round2(available - outcome.amount);
+        } else if (outcome.status === "duplicate") summary.duplicates += 1;
         else summary.skipped += 1;
       }
     } catch (err) {
       if (isTxUnsupportedError(err)) throw toConfigError();
-      console.error("Weekly automation failed for user:", String(uid).slice(-6), err?.message || err);
-      summary.errors.push({ user: String(uid), message: err?.message || "unknown" });
+      console.error(
+        "Weekly automation failed for user:",
+        String(uid).slice(-6),
+        err?.message || err,
+      );
+      summary.errors.push({
+        user: String(uid),
+        message: err?.message || "unknown",
+      });
     }
   }
   return summary;
@@ -928,10 +1135,19 @@ export const runWeeklyCycleForAllUsers = async (cycleKey, now = new Date()) => {
 
 export const runMonthlyCycleForAllUsers = async (cycleKey) => {
   const users = await distinctAutomationUsers("monthly");
-  const summary = { cycleKey, processedUsers: 0, contributed: 0, skipped: 0, duplicates: 0, errors: [] };
+  const summary = {
+    cycleKey,
+    processedUsers: 0,
+    contributed: 0,
+    skipped: 0,
+    duplicates: 0,
+    errors: [],
+  };
   for (const uid of users) {
     try {
-      const wallet = await Wallet.findOne({ user: uid }).select("balance").lean();
+      const wallet = await Wallet.findOne({ user: uid })
+        .select("balance")
+        .lean();
       if (!wallet) continue;
       const initialBalance = round2(Number(wallet.balance) || 0);
       let available = initialBalance;
@@ -946,24 +1162,55 @@ export const runMonthlyCycleForAllUsers = async (cycleKey) => {
         .lean();
       summary.processedUsers += 1;
       for (const g of goals) {
-        if (g.automation?.lastProcessedCycle === cycleKey) { summary.duplicates += 1; continue; }
+        if (g.automation?.lastProcessedCycle === cycleKey) {
+          summary.duplicates += 1;
+          continue;
+        }
         const pct = Number(g.automation?.percentage);
-        if (!isValidPercentage(pct)) { summary.skipped += 1; continue; }
+        if (!isValidPercentage(pct)) {
+          summary.skipped += 1;
+          continue;
+        }
         const planned = round2((initialBalance * pct) / 100);
-        if (!(planned > 0)) { summary.skipped += 1; continue; }
-        const remaining = round2(Number(g.targetAmount) - Number(g.savedAmount));
-        if (remaining <= 0) { summary.skipped += 1; continue; }
+        if (!(planned > 0)) {
+          summary.skipped += 1;
+          continue;
+        }
+        const remaining = round2(
+          Number(g.targetAmount) - Number(g.savedAmount),
+        );
+        if (remaining <= 0) {
+          summary.skipped += 1;
+          continue;
+        }
         const contribution = round2(Math.min(planned, remaining));
-        if (contribution > available) { summary.skipped += 1; continue; }
-        const outcome = await executeContribution({ userId: uid, goalId: g._id, cycleKey, plannedAmount: planned });
-        if (outcome.status === "contributed") { summary.contributed += 1; available = round2(available - outcome.amount); }
-        else if (outcome.status === "duplicate") summary.duplicates += 1;
+        if (contribution > available) {
+          summary.skipped += 1;
+          continue;
+        }
+        const outcome = await executeContribution({
+          userId: uid,
+          goalId: g._id,
+          cycleKey,
+          plannedAmount: planned,
+        });
+        if (outcome.status === "contributed") {
+          summary.contributed += 1;
+          available = round2(available - outcome.amount);
+        } else if (outcome.status === "duplicate") summary.duplicates += 1;
         else summary.skipped += 1;
       }
     } catch (err) {
       if (isTxUnsupportedError(err)) throw toConfigError();
-      console.error("Monthly automation failed for user:", String(uid).slice(-6), err?.message || err);
-      summary.errors.push({ user: String(uid), message: err?.message || "unknown" });
+      console.error(
+        "Monthly automation failed for user:",
+        String(uid).slice(-6),
+        err?.message || err,
+      );
+      summary.errors.push({
+        user: String(uid),
+        message: err?.message || "unknown",
+      });
     }
   }
   return summary;
@@ -977,7 +1224,13 @@ export const runReleasesForAllUsers = async (now = new Date()) => {
     .select("user")
     .lean();
   const users = [...new Set(due.map((g) => String(g.user)))];
-  const summary = { processedUsers: 0, released: 0, duplicates: 0, skipped: 0, errors: [] };
+  const summary = {
+    processedUsers: 0,
+    released: 0,
+    duplicates: 0,
+    skipped: 0,
+    errors: [],
+  };
   for (const uid of users) {
     try {
       const releases = await processReleasesForUser(uid, now);
@@ -989,9 +1242,97 @@ export const runReleasesForAllUsers = async (now = new Date()) => {
       }
     } catch (err) {
       if (isTxUnsupportedError(err)) throw toConfigError();
-      console.error("Release failed for user:", String(uid).slice(-6), err?.message || err);
-      summary.errors.push({ user: String(uid), message: err?.message || "unknown" });
+      console.error(
+        "Release failed for user:",
+        String(uid).slice(-6),
+        err?.message || err,
+      );
+      summary.errors.push({
+        user: String(uid),
+        message: err?.message || "unknown",
+      });
     }
   }
   return summary;
+};
+
+const releaseCompletedGoal = async ({
+  userId,
+  goal,
+  wallet,
+  amount,
+  walletBalanceBefore,
+  session,
+  now = new Date(),
+}) => {
+  const walletBalanceAfter = round2(walletBalanceBefore + amount);
+  const cycleKey = `goal-${goal._id}`; // 29 chars; stable and unique per goal
+
+  await Wallet.updateOne(
+    { _id: wallet._id },
+    { $inc: { balance: amount } },
+    { session },
+  );
+
+  await Goal.updateOne(
+    { _id: goal._id, user: userId },
+    {
+      $set: {
+        status: "released",
+        completedAt: goal.completedAt || now,
+        releasedAt: now,
+        releasedAmount: amount,
+        "automation.enabled": false,
+      },
+    },
+    { session },
+  );
+
+  await GoalTransfer.create(
+    [
+      {
+        user: userId,
+        goal: goal._id,
+        type: "goal_release",
+        amount,
+        cycleKey,
+        walletBalanceBefore,
+        walletBalanceAfter,
+      },
+    ],
+    { session },
+  );
+
+  await Transaction.create(
+    [
+      {
+        user: userId,
+        type: "income",
+        category: "Savings",
+        amount,
+        date: now,
+        description: `Completed goal funds returned to wallet: ${goal.title}`,
+      },
+    ],
+    { session },
+  );
+
+  const alertKey = `goal_complete_release:${String(goal._id)}`;
+  await Alert.updateOne(
+    { user: userId, sourceKey: alertKey },
+    {
+      $setOnInsert: {
+        user: userId,
+        type: "savings_goal",
+        severity: "medium",
+        title: "Goal completed and funds returned",
+        message: `${taka(amount)} from ${goal.title} was returned to your wallet.`,
+        actionLink: "/goals",
+        relatedGoal: goal._id,
+        sourceKey: alertKey,
+        dedupeKey: alertKey,
+      },
+    },
+    { upsert: true, session },
+  );
 };
