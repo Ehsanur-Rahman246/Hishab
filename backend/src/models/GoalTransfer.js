@@ -48,7 +48,9 @@ const goalTransferSchema = new mongoose.Schema(
     // Client-generated UUID sent with manual add-savings requests. A retry
     // with the same key returns the original transfer instead of deducting
     // the wallet again. Absent on automatic transfers (they dedupe by
-    // cycleKey instead), so the index below is sparse.
+    // cycleKey instead). The partial index below covers only string keys, so
+    // keyless rows (auto contributions, releases, most manual rows) never
+    // collide with each other — only a repeated key is rejected.
     idempotencyKey: {
       type: String,
       trim: true,
@@ -65,14 +67,22 @@ goalTransferSchema.index(
   { unique: true },
 );
 goalTransferSchema.index({ user: 1, createdAt: -1 });
+// Partial (not sparse): a compound sparse index still indexes every row here
+// because `user` is always present, which made any two keyless rows for one
+// user collide. Only string idempotency keys are indexed, so keyless ledger
+// rows never collide while repeated keys are still rejected exactly once.
 goalTransferSchema.index(
   { user: 1, idempotencyKey: 1 },
+<<<<<<< HEAD
   {
     unique: true,
     partialFilterExpression: {
       idempotencyKey: { $type: "string" },
     },
   },
+=======
+  { unique: true, partialFilterExpression: { idempotencyKey: { $type: "string" } } },
+>>>>>>> 381a66cc80bf0087bf6d4272e724beeb27eeed7d
 );
 
 const GoalTransfer = mongoose.model("GoalTransfer", goalTransferSchema);

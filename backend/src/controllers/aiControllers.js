@@ -690,6 +690,8 @@ export const askCoach = async (req, res) => {
               goalTitle: addMoney.goalTitle,
               amount: addMoney.amount,
               completed: addMoney.completed,
+              released: addMoney.released,
+              releasedAmount: addMoney.releasedAmount,
             },
             coach: {
               language: language === "bn" ? "bn" : language === "en" ? "en" : "mixed",

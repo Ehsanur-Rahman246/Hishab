@@ -253,11 +253,15 @@ function estimateOf(goal) {
 // Small badge in the card's top-right corner.
 function badgeOf(goal, pct) {
   if (goal.status === "released")
+<<<<<<< HEAD
     return {
       text: "Released",
       icon: Undo2,
       tone: "bg-[#eaf3fc] text-[#064581] dark:bg-primary/15 dark:text-primary",
     };
+=======
+    return { text: "Completed & released", icon: Undo2, tone: "bg-[#eaf3fc] text-[#064581] dark:bg-primary/15 dark:text-primary" };
+>>>>>>> 381a66cc80bf0087bf6d4272e724beeb27eeed7d
   if (goal.status === "completed")
     return {
       text: "Completed",
@@ -326,10 +330,14 @@ function AutomationLine({ goal }) {
     return (
       <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
         <Undo2 className="size-3.5" aria-hidden="true" />
+<<<<<<< HEAD
         Released
         {goal.releasedAmount != null
           ? ` · ${money(goal.releasedAmount)} returned`
           : ""}
+=======
+        Completed &amp; released{goal.releasedAmount != null ? ` · ${money(goal.releasedAmount)} returned` : ""}
+>>>>>>> 381a66cc80bf0087bf6d4272e724beeb27eeed7d
         {goal.releasedAt ? ` · ${formatDate(goal.releasedAt)}` : ""}
       </p>
     );
@@ -516,7 +524,7 @@ function GoalCard({
         <p className="mt-1.5 min-h-5 text-xs text-muted-foreground">
           {released
             ? goal.releasedAt
-              ? `Released on ${formatDate(goal.releasedAt)}${goal.releasedAmount != null ? ` · ${money(goal.releasedAmount)} returned to wallet` : ""}`
+              ? `Completed & released on ${formatDate(goal.releasedAt)}${goal.releasedAmount != null ? ` · ${money(goal.releasedAmount)} returned to wallet` : ""}`
               : "Funds returned to wallet"
             : completed
               ? goal.completedAt
@@ -1413,6 +1421,7 @@ function AddMoneyForm({ goal, onDone }) {
             toast.info(msg);
             return;
           }
+<<<<<<< HEAD
           if (res?.goal?.status === "released") {
             toast.success(
               `${goal.title} completed. ${money(res.goal.releasedAmount)} returned to your wallet.`,
@@ -1422,6 +1431,16 @@ function AddMoneyForm({ goal, onDone }) {
           } else {
             toast.success(`${money(value)} added to ${goal.title}`);
           }
+=======
+          // Early completion: the same transaction already returned the full
+          // saved amount to the wallet — say so explicitly.
+          if (res?.released) {
+            const amt = Number(res.releasedAmount || 0).toLocaleString("en-BD");
+            toast.success(`Goal completed early — BDT ${amt} has been returned to your wallet.`);
+          } else if (res?.goal?.status === "completed")
+            toast.success(`You reached "${goal.title}"! ${money(value)} moved to the goal.`);
+          else toast.success(`${money(value)} added to ${goal.title}`);
+>>>>>>> 381a66cc80bf0087bf6d4272e724beeb27eeed7d
           onDone();
         },
         onError: (err) =>

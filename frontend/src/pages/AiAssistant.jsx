@@ -35,6 +35,9 @@ import { useDeleteAllMessages, useMessages } from "@/hooks/useChat";
 import { confirmGoalAddMoney, confirmGoalDelete } from "@/api/aiGoalApi";
 import { confirmGoalAddMoneyToken, cancelGoalAddMoneyToken } from "@/api/aiGoalApi";
 import { TrustAndSafety } from "@/components/ai/TrustAndSafety";
+import { ShortfallPlanCard } from "@/components/shortfall/ShortfallPlanCard";
+import { ShortfallProgressCard } from "@/components/shortfall/ShortfallProgressCard";
+import { FeedbackPriorityReport } from "@/components/shortfall/FeedbackPriorityReport";
 import { useSummaries } from "@/hooks/useSummaries";
 import { useQueryClient } from "@tanstack/react-query";
 import { CATEGORIES, monthKey, recentMonths } from "@/lib/dashboard";
@@ -915,6 +918,13 @@ function InsightsView() {
 
       {!isLoading && hasRows ? (
         <>
+          {/* Coaching priority: 1) predicted shortfall + verified driver,
+              2) one actionable expense/timing suggestion,
+              3) optional savings-goal action only if it does not worsen
+              predicted shortfall. The ShortfallPlanCard renders first and is
+              the default card when risk is medium/high. */}
+          <ShortfallProgressCard compact />
+          <ShortfallPlanCard />
           <OverallRiskCard
             level={overall?.level ? safeRisk(overall.level) : worstRisk(rows)}
             reason={
@@ -948,6 +958,7 @@ function InsightsView() {
             historicalWeeks={quality?.historicalWeeks ?? null}
             message={quality?.message ?? null}
           />
+          <FeedbackPriorityReport />
           <TrustAndSafety compact />
         </>
       ) : null}

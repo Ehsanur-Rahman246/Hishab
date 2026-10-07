@@ -10,6 +10,7 @@ import {
   addMoneyNeedAmountReply,
   addMoneyNotFoundReply,
   addedReply,
+  addedEarlyReleaseReply,
   ambiguousReply,
   confirmPromptReply,
   deletedReply,
@@ -399,7 +400,11 @@ export const confirmGoalAddMoney = async (req, res) => {
 
     const title = outcome.result.goal?.title || goal.title;
     const doneAmount = outcome.result.status === "duplicate" ? Number(outcome.result.transfer?.amount) || amount : amount;
-    const reply = addedReply(title, doneAmount, language);
+    const released = Boolean(outcome.result.released);
+    const releasedAmount = Number(outcome.result.releasedAmount) || 0;
+    const reply = released
+      ? addedEarlyReleaseReply(title, doneAmount, releasedAmount, language)
+      : addedReply(title, doneAmount, language);
     await ChatMessage.create({ user: userId, role: "assistant", text: reply });
     return res.status(200).json({
       success: true,
@@ -407,6 +412,8 @@ export const confirmGoalAddMoney = async (req, res) => {
       goalTitle: title,
       amount: doneAmount,
       completed: Boolean(outcome.result.completed),
+      released,
+      releasedAmount,
       reply,
     });
   } catch (error) {
@@ -454,7 +461,11 @@ export const confirmGoalAddMoneyToken = async (req, res) => {
     });
     const title = result.goal?.title || "goal";
     const doneAmount = Number(result.transfer?.amount) || 0;
-    const reply = addedReply(title, doneAmount, language);
+    const released = Boolean(result.released);
+    const releasedAmount = Number(result.releasedAmount) || 0;
+    const reply = released
+      ? addedEarlyReleaseReply(title, doneAmount, releasedAmount, language)
+      : addedReply(title, doneAmount, language);
     await ChatMessage.create({ user: userId, role: "assistant", text: reply });
     return res.status(200).json({
       success: true,
@@ -462,6 +473,8 @@ export const confirmGoalAddMoneyToken = async (req, res) => {
       goalTitle: title,
       amount: doneAmount,
       completed: Boolean(result.completed),
+      released,
+      releasedAmount,
       reply,
     });
   } catch (error) {

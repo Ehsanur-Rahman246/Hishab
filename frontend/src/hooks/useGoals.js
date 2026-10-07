@@ -75,9 +75,12 @@ export const useAddSavings = () => {
     onSuccess: () => {
       // A manual transfer moves Wallet -> Goal and writes ledger +
       // transaction rows, so every affected cache refreshes at once.
+      // A goal-completing transfer also releases funds (wallet credit +
+      // release alert), so alerts refresh too.
       qc.invalidateQueries({ queryKey: ["goals"] });
       qc.invalidateQueries({ queryKey: ["wallet"] });
       qc.invalidateQueries({ queryKey: ["transactions"] });
+      qc.invalidateQueries({ queryKey: ["alerts"] });
       qc.invalidateQueries({ queryKey: ["summaries"] });
     },
   });

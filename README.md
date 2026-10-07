@@ -13,18 +13,41 @@ Hishab turns raw transaction history into clear spending insight, 4-week cash-fl
 
 ## Problem Statement
 
-Bangladesh MFS users generate plenty of transactions and wallet balances, but those numbers rarely turn into understanding. Most users cannot answer simple questions: *Where did my money go this month? Will I run short next month? Am I actually saving enough?* Existing tools are usually English-only, offer no forward-looking guidance, and give no friendly way to build savings discipline. Hishab closes that gap with understandable cash-flow insight, savings guidance, and Bangla-friendly financial support built around the wallet users already have.
+User:
+Bangladesh MFS users with irregular or tight monthly cash flow.
+
+Problem:
+They often discover a cash-flow shortfall only after spending has already happened.
+
+Consequence:
+This can force delayed bills, reduced savings, or unplanned borrowing.
+
+Measurable metric:
+Percentage of completed user-months where recorded expenses exceed recorded income.
+
+Intervention:
+A multilingual Shortfall Prevention Plan based on the user's own transaction history.
+
+Success criterion:
+A lower observed cash-flow-shortfall rate after accepted plans, reported only with sufficient longitudinal evidence and never claimed as causal without a controlled study.
+
+Operational definition (used verbatim in code, UI, reports, seed data):
+Historical cash-flow shortfall month = a completed calendar month where total recorded expenses exceed total recorded income. Call this "cash-flow shortfall," not "negative wallet balance," unless a verified month-start wallet balance and full wallet ledger make actual balance reconstruction possible. A forecasted shortfall = projected four-week expenses exceed projected four-week income, or the existing cumulative predicted balance becomes negative when a reliable current wallet balance is available.
+
+Details: `PRODUCT_OUTCOME_REPORT.md` (methodology, synthetic demo baseline, funnel, research status, limits) and `docs/JUDGE_DEMO_SCRIPT_60S.md` (60-second demo). Research package: `docs/USER_RESEARCH_PROTOCOL.md`, `docs/INTERVIEW_GUIDE_BN_EN.md`, `docs/RESEARCH_CONSENT.md`, `docs/USER_RESEARCH_RESULTS_TEMPLATE.md`. Status: user interviews pending — no qualitative claims are made yet. All demo numbers are labelled synthetic; real-user metrics stay empty/pending until consented study data exists.
 
 ## Solution Overview
 
 Hishab takes a user's own transaction data and turns it into:
 
-- **Spending analytics** — totals, top categories, weekly history, and dashboard views.
-- **4-week forecast** — predicted income/expense per week with a weekly shortfall risk.
-- **Unusual-expense detection** — IsolationForest on real data, IQR rule on small data, always labelled with the method used.
-- **Smart alerts** — deduplicated future-shortfall and unusual-spending notifications.
-- **Zakat calculation** — deterministic 2.5% math on nisab rules with labelled live-or-reference market data.
-- **Savings goals** — manual contributions plus priority-based weekly/monthly automation.
+- **Shortfall Prevention Plan (core intervention)** — detects upcoming shortfall risk, explains the top driver from the user's own transactions, gives at most one concrete action, and records useful / not-useful / completed with Bangla / English / Banglish (`GET /api/shortfall/plan`, `ShortfallPlanCard` first card on Forecast + AI Assistant).
+- **Shortfall progress tracking (primary outcome)** — transaction-derived baseline shortfall rate over completed months only, forecasted risk, and observational pre/post comparison (`GET /api/shortfall/outcome`, `ShortfallProgressCard`). Current partial month never counts; thin history shows "insufficient history".
+- **Spending analytics (supportive)** — totals, top categories, weekly history, and dashboard views.
+- **4-week forecast (supportive: risk detector)** — predicted income/expense per week with a weekly shortfall risk.
+- **Unusual-expense detection (supportive)** — IsolationForest on real data, IQR rule on small data, always labelled with the method used; flags an unusual expense that may contribute to a possible shortfall.
+- **Smart alerts (supportive)** — deduplicated future-shortfall and unusual-spending notifications.
+- **Zakat calculation (separate utility, not part of the primary success metric)** — deterministic 2.5% math on nisab rules with labelled live-or-reference market data.
+- **Savings goals (supportive: help only after immediate shortfall risk is understood)** — manual contributions plus priority-based weekly/monthly automation.
 - **Bilingual AI coaching** — Bangla / English / mixed explanations grounded only in the user's own data.
 - **Safe goal actions** — chat can add savings (with wallet-balance conditions) and delete goals (with explicit confirmation) through deterministic, auditable backend services. The LLM never touches money.
 
@@ -38,10 +61,11 @@ Hishab takes a user's own transaction data and turns it into:
 | Forecasting | 4-week LinearRegression forecast (or honest historical-average fallback) with per-week shortfall risk (`low` / `medium` / `high`) |
 | Unusual spending | IsolationForest flags (10+ expenses) or IQR fallback, newest-first, capped list |
 | AI coach | Bangla / English / mixed replies, at most 3 actions, disclaimer on every reply, 10 questions per 10 minutes per user |
-| Manual goal saving | `POST /api/goals/:id/add-savings` moves Wallet to Goal atomically with idempotency keys |
-| Goal automation | Weekly/monthly cycles, fixed 5/10/15/20/25% choices, priority order (1 funded first), pause/resume, per-cycle idempotency |
+| Manual goal saving | `POST /api/goals/:id/add-savings` moves Wallet to Goal atomically with idempotency keys; overshoots are capped at the remaining target |
+| Early completion release | A fully funded goal releases its saved amount immediately to the wallet, even before target date, exactly once and atomically (status `released`, one `goal_release` ledger row, one `Savings` income Transaction, one deduplicated alert) |
+| Goal automation | Weekly/monthly cycles, fixed 5/10/15/20/25% choices, priority order (1 funded first), pause/resume, per-cycle idempotency; a cycle that completes a goal releases it in the same transaction |
 | Run now (demo) | `POST /api/goals/automation/run-now` processes only the logged-in user's currently-due cycle plus releases — same safety as the scheduler |
-| Target-date release | Due goals release `savedAmount` back to the wallet exactly once, with income Transaction, ledger row, and alert |
+| Target-date release | Due goals release `savedAmount` back to the wallet exactly once, with income Transaction, ledger row, and alert (shared release writer with early completion, so both paths can never refund the same goal twice) |
 | Funded goal deletion | Deletes the goal and refunds `savedAmount` to the wallet with a `Savings` income Transaction and a `goal_cancelled_refund` ledger row; retries never refund twice |
 | AI chat contribution | Commands like “Add 500 taka to my iPhone goal” execute directly; optional wallet-balance conditions (strictly greater-than) are enforced server-side |
 | AI-assisted deletion | “Delete my iPhone goal” proposes; “Yes, delete iPhone goal” executes via the same refund service; ambiguous titles ask the user to choose |
@@ -69,10 +93,11 @@ If any account fails to log in (e.g. fresh database), register a new account on 
 2. **Add wallet money and a few transactions** (salary income plus food and transport expenses across different dates — forecasts need several weeks of history for the full ML path).
 3. **View Dashboard and Analytics** for totals, categories, and trends.
 4. **Open AI Assistant, generate insights, and ask a Bangla/Banglish question**, e.g. “Ei mashe amar khoroch kothay beshi?”
-5. **Create a goal** (e.g. Emergency Fund) and **add savings** from the Goals page.
-6. **Try a safe AI command**, e.g. “Wallet e 500 takar beshi thakle Emergency Fund goal e 500 taka add koro”. It executes only if the wallet balance is strictly above 500 BDT, the goal is active, and funds suffice — otherwise it explains why in Bangla/English and moves nothing.
-7. **Press “Run now (demo)”** on the Goals page to process the currently-due automation cycle and any due releases for your account only. Repeating it never double-deducts.
-8. **Check Transactions and transfer history**: every goal movement has a matching `Savings` Transaction and an immutable GoalTransfer ledger row.
+5. **Create a goal** (e.g. Emergency Fund) and **add savings** from the Goals page. Overshooting the remaining target only takes what is still needed.
+6. **Complete the goal early**: add the remaining amount and watch the goal flip to “Completed & released” — the full saved amount returns to your wallet in the same transaction (“Goal completed early — BDT X has been returned to your wallet.”).
+7. **Try a safe AI command**, e.g. “Wallet e 500 takar beshi thakle Emergency Fund goal e 500 taka add koro”. It executes only if the wallet balance is strictly above 500 BDT, the goal is active, and funds suffice — otherwise it explains why in Bangla/English and moves nothing.
+8. **Press “Run now (demo)”** on the Goals page to process the currently-due automation cycle and any due releases for your account only. Repeating it never double-deducts.
+9. **Check Transactions and transfer history**: every goal movement has a matching `Savings` Transaction and an immutable GoalTransfer ledger row.
 
 Required conditions: the backend needs a MongoDB replica set for any money movement, the AI service should be running for forecasts, and Groq credentials are needed for live coach replies (otherwise a clear “not configured” message appears).
 
@@ -116,8 +141,9 @@ This is the core promise to users and judges: **the LLM never moves money.**
 - **Deterministic money services only.** Every transfer runs in `goalAutomationService.js` (`executeManualContribution`, `executeGoalDeletion`, scheduled contributions, releases). Chat and coach code can only request these services — they cannot deduct, credit, or invent amounts.
 - **JWT user scoping.** All routes sit behind `authMiddleware`; every query filters by the JWT user (`{ _id, user }`). One user can never read or modify another user's wallet or goals.
 - **Goal ownership and status checks.** Contributions accept active goals only; released, cancelled, paused, or completed goals cannot receive money. Clients can never set `savedAmount` directly, and `released` is system-only.
-- **Atomic sessions.** Wallet, Goal, GoalTransfer, and Transaction writes happen inside one MongoDB transaction/session — any failure aborts everything, so balances and history can never disagree.
-- **Idempotency.** Manual transfers carry client idempotency keys (sparse unique index); automation uses unique `(user, goal, type, cycleKey)` ledger keys plus per-cycle markers. Retries, double-clicks, scheduler restarts, and concurrent requests collapse to one transfer.
+- **Early completion release.** A fully funded goal releases its saved amount immediately to the wallet, even before target date, exactly once and atomically. The final contribution and the release share one MongoDB transaction (never “complete first, release later”); the persisted state is `released` with `completedAt`, `releasedAt`, and `releasedAmount`. Goal lifecycle: `active → completed → released`, where `completed` is transient and `released` is final once money has returned.
+- **Atomic sessions.** Wallet, Goal, GoalTransfer, and Transaction writes happen inside one MongoDB transaction/session — any failure aborts everything, so balances and history can never disagree. Contribution goal-updates and the release claim are conditional writes, so concurrent final contributions, scheduler runs, and target-date releases serialize to exactly one outcome.
+- **Idempotency.** Manual transfers carry client idempotency keys (partial unique index on string keys — keyless ledger rows never collide); automation uses unique `(user, goal, type, cycleKey)` ledger keys plus per-cycle markers. Target-date and early-completion releases share one release writer, one `goal_release` ledger namespace, and one alert dedupe key, so retries, double-clicks, scheduler restarts, concurrent requests, and release-vs-delete races collapse to a single refund.
 - **Deletion requires confirmation.** Chat proposes first (“Yes, delete …” executes); ambiguous titles show matching goals and move nothing until the user chooses.
 - **Honest AI boundaries.** The coach answers from supplied aggregates only, caps replies (3 actions max), and always disclaims estimates. It gives no investment, credit, lending, tax, legal, or religious rulings — Zakat help is general-concept only plus the deterministic calculator.
 - **Privacy-safe provider context.** Groq receives aggregates (totals, categories, forecast, goals, recent messages, active alerts). Raw transactions, emails, phones, passwords, and secrets never cross the provider boundary, and chat history stores message texts only.
@@ -290,7 +316,7 @@ Only names from the shipped `.env.example` files are listed. Copy each example t
 
 | Suite | Command (from the service folder) | Coverage |
 | ----- | --------------------------------- | -------- |
-| Backend | `npm test` (`node --test tests/*.test.js`) | Goal deletion refund (zero-balance, funded, retry/concurrency, release-vs-delete race, cross-user block); AI add-money confirm-first (propose never moves money, token confirm moves once, ambiguous/condition/inactive/cross-user/idempotent paths); AI action parsing; coach numerical grounding (22 BN/EN/Banglish cases + scorer unit checks); number-guard replacement hardening (9 attacks + 3 grounded); prompt-injection suite (BN/EN/Banglish override, reveal, fabricate, embedded); CSRF double-submit (valid/missing/invalid/cross-user/expired/exempt/flags); retention cleanup + immutable-ledger protection; privacy boundaries; snapshot metadata schema |
+| Backend | `npm test` (`node --test tests/*.test.js`) | Goal early-completion release (exact/capped funding, wallet math, single ledger/income/alert, chat confirm path, retry/concurrency, scheduler skip, target-date race, delete-after-release, cross-user block, zero-balance); goal deletion refund (zero-balance, funded, retry/concurrency, release-vs-delete race, cross-user block); AI add-money confirm-first (propose never moves money, token confirm moves once, ambiguous/condition/inactive/cross-user/idempotent paths); AI action parsing; coach numerical grounding (22 BN/EN/Banglish cases + scorer unit checks); number-guard replacement hardening (9 attacks + 3 grounded); prompt-injection suite (BN/EN/Banglish override, reveal, fabricate, embedded); CSRF double-submit (valid/missing/invalid/cross-user/expired/exempt/flags); retention cleanup + immutable-ledger protection; privacy boundaries; snapshot metadata schema |
 | AI service | `python tests/test_ml_service.py` | 23 checks: regression vs fallback selection, forecast weeks, non-negative clipping, risk rules, outlier flagging, income-only and identical-amount edges |
 | AI service eval | `python tests/test_evaluation.py` | 28 checks: expanding-window temporal split, LR-wins vs baseline-wins fixtures, ineligible-data honesty, finite/reproducible/hand-checked MAE-RMSE-sMAPE |
 | Forecast validation | `python tests/test_forecast_validation.py` | 45 checks: transaction-level chronological split, independent OLS/mean recomputation, per-series winners, spy proofs of no holdout leakage, rolling-origin cutoffs |
@@ -319,6 +345,16 @@ Backend tests spin up an in-memory MongoDB replica set via `mongodb-memory-serve
 - **Where to look.** Forecast page and AI Assistant show an “Evaluation & reliability” card (train/test dates, trend-vs-average table, not-enough-data state, salary/festival state, expandable “How this was checked”). Full computed numbers: `EVALUATION_REPORT.md` (regenerate with `ai-service/tests/generate_eval_report.py`).
 - **Privacy & safety.** Groq receives aggregates only — never raw transactions, labels, or PII. Money movement is unchanged (deterministic backend services; the LLM never moves money).
 - **Fixture ≠ production accuracy.** All reported numbers come from small, clean synthetic fixtures. They validate methodology and guard regressions; they do not prove real-world accuracy. Real-world validation needs labelled user data collected over time. `EVALUATION_REPORT.md` states this explicitly alongside the measured values.
+
+## Differentiation & Impact Validation (judge-ready)
+
+**Primary hypothesis:** Compared with a standard transaction dashboard or rule-based savings planner, Hishab's combined workflow (forecast → personalized Bangla/Banglish coaching → one shortfall-prevention action → explicit goal contribution confirmation) improves savings adherence, reduces cash-flow shortfall events, or improves goal completion.
+
+- **Comparison arms** (`GET /api/experiments/arms`, `ARMS` in `backend/src/services/experimentService.js`): **Control** (transaction list + totals + category chart; no forecast, coach, alert, or recommendation) vs **Rule-Based planner** (dashboard + fixed “save 10%” rule + manual contributions; no forecast prioritization, coaching, or shortfall prevention) vs **Hishab Combined Workflow** (4-week forecast + shortfall/surplus detection + Bangla/English/Banglish explanation + one prioritized action + forecast-gated goal suggestion + explicit confirmation + feedback capture). No real commercial competitor is named or measured — only generic categories.
+- **Metrics** (denominator-explicit envelopes: numerator, denominator, sample count, date range, eligibility, limitation): `savingsAdherenceRate = actualSavingsBDT / plannedSavingsBDT` (no-plan → null, never 100%); `shortfallEventRate = shortfallMonths / completedObservedMonths` (observed vs forecasted kept separate); `goalCompletionRate = completedGoals / eligibleGoals` (on-time tracked separately; new goals excluded). Workflow funnel: `forecast_viewed → shortfall_plan_shown → coach_language_used → coach_action_accepted/dismissed → goal_suggestion_shown → goal_contribution_proposed → goal_contribution_confirmed → goal_contribution_completed → feedback_useful/not_useful` (`POST /api/experiments/events`, allowlist-sanitized metadata only).
+- **Synthetic-data boundary:** deterministic simulation over 9 version-controlled scripted fixtures (`synthetic_demo_only`) validates workflow logic only — safety gate (shortfall → defer, surplus → capped suggestion), confirmation-before-completion, metric math. Results: adherence null / 0.333 / 1.0; shortfall 0.5 all arms (identical by construction); goal completion 0.333 all arms; unsafe suggestions rule-based 0.333 vs Hishab 0; overall status `insufficient_evidence`, no winner. Reproduce: `node scripts/run-synthetic-experiment.mjs` (from `backend/`). Full numbers + pilot protocol: `DIFFERENTIATION_AND_IMPACT_REPORT.md`.
+- **Real-user pilot plan:** balanced assignment to the three arms, explicit consent, 2–3 monthly cycles, predefined primary metric (adherence or shortfall-event rate), ≥10 users per arm with ≥2 completed months each, attrition tracking, no causal claim until thresholds are met (`GET /api/experiments/outcomes` returns `insufficient_evidence` below them).
+- **UI:** “Why Hishab?” comparison + workflow visual + “Synthetic workflow validation” results card on the landing page.
 
 ## Limitations and Roadmap
 

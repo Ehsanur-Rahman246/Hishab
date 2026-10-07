@@ -573,6 +573,11 @@ export const updatePlan = async (req, res) => {
 // Savings expense Transaction in one MongoDB transaction) and
 // idempotent: resend the same idempotencyKey and the original transfer is
 // returned without moving money again.
+// A contribution that fully funds the goal releases the full savedAmount
+// back to the wallet inside the SAME transaction (early completion release:
+// status `released`, one goal_release ledger row, one Savings income
+// Transaction, one deduplicated alert) — the response then carries
+// completed: true, released: true, releasedAmount, and walletBalance.
 export const addSavings = async (req, res) => {
   try {
     const userId = req.user.userId;
@@ -587,12 +592,41 @@ export const addSavings = async (req, res) => {
     });
 
     if (result.status === "duplicate") {
+      if (result.reason === "already_released") {
+        const releasedAmount = Number(result.transfer?.amount) || 0;
+        return res.status(200).json({
+          success: true,
+          duplicate: true,
+          message: "This goal was already completed and released; no money was moved again.",
+          goal: result.goal,
+          transfer: result.transfer,
+          completed: true,
+          released: true,
+          releasedAmount,
+        });
+      }
       return res.status(200).json({
         success: true,
         duplicate: true,
         message: "This transfer was already processed; no money was moved again.",
         goal: result.goal,
         transfer: result.transfer,
+        completed: Boolean(result.goal?.status === "released" || result.goal?.status === "completed"),
+        released: result.goal?.status === "released",
+      });
+    }
+
+    if (result.released) {
+      const releasedAmount = Number(result.releasedAmount) || 0;
+      return res.status(200).json({
+        success: true,
+        message: `Goal completed early — BDT ${releasedAmount.toLocaleString("en-BD")} has been returned to your wallet.`,
+        goal: result.goal,
+        transfer: result.transfer,
+        completed: true,
+        released: true,
+        releasedAmount,
+        walletBalance: result.walletBalanceAfter,
       });
     }
 
@@ -601,7 +635,10 @@ export const addSavings = async (req, res) => {
       message: result.completed ? `You reached "${result.goal.title}"!` : "Savings added successfully",
       goal: result.goal,
       transfer: result.transfer,
-      completed: result.completed,
+      completed: Boolean(result.completed),
+      released: false,
+      releasedAmount: 0,
+      walletBalance: result.walletBalanceAfter,
     });
   } catch (error) {
     if (error?.statusCode === 400 || error?.statusCode === 404) {
