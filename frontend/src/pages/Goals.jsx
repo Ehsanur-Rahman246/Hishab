@@ -235,7 +235,7 @@ function estimateOf(goal) {
 // Small badge in the card's top-right corner.
 function badgeOf(goal, pct) {
   if (goal.status === "released")
-    return { text: "Released", icon: Undo2, tone: "bg-[#eaf3fc] text-[#064581] dark:bg-primary/15 dark:text-primary" };
+    return { text: "Completed & released", icon: Undo2, tone: "bg-[#eaf3fc] text-[#064581] dark:bg-primary/15 dark:text-primary" };
   if (goal.status === "completed")
     return { text: "Completed", icon: CheckCircle2, tone: "bg-success/12 text-success" };
   if (goal.status === "paused")
@@ -284,7 +284,7 @@ function AutomationLine({ goal }) {
     return (
       <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
         <Undo2 className="size-3.5" aria-hidden="true" />
-        Released{goal.releasedAmount != null ? ` · ${money(goal.releasedAmount)} returned` : ""}
+        Completed &amp; released{goal.releasedAmount != null ? ` · ${money(goal.releasedAmount)} returned` : ""}
         {goal.releasedAt ? ` · ${formatDate(goal.releasedAt)}` : ""}
       </p>
     );
@@ -450,7 +450,7 @@ function GoalCard({
         <p className="mt-1.5 min-h-5 text-xs text-muted-foreground">
           {released
             ? goal.releasedAt
-              ? `Released on ${formatDate(goal.releasedAt)}${goal.releasedAmount != null ? ` · ${money(goal.releasedAmount)} returned to wallet` : ""}`
+              ? `Completed & released on ${formatDate(goal.releasedAt)}${goal.releasedAmount != null ? ` · ${money(goal.releasedAmount)} returned to wallet` : ""}`
               : "Funds returned to wallet"
             : completed
               ? goal.completedAt
@@ -1213,7 +1213,12 @@ function AddMoneyForm({ goal, onDone }) {
             toast.info(msg);
             return;
           }
-          if (res?.goal?.status === "completed")
+          // Early completion: the same transaction already returned the full
+          // saved amount to the wallet — say so explicitly.
+          if (res?.released) {
+            const amt = Number(res.releasedAmount || 0).toLocaleString("en-BD");
+            toast.success(`Goal completed early — BDT ${amt} has been returned to your wallet.`);
+          } else if (res?.goal?.status === "completed")
             toast.success(`You reached "${goal.title}"! ${money(value)} moved to the goal.`);
           else toast.success(`${money(value)} added to ${goal.title}`);
           onDone();

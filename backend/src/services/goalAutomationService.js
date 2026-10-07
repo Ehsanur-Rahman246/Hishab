@@ -121,6 +121,9 @@ const isDuplicateKey = (err) =>
   String(err?.message || "").includes("duplicate key");
 
 // --- single contribution (one MongoDB transaction) -------------------------
+// Scheduler/auto path. Same early-completion rule as manual contributions: a
+// contribution that fully funds the goal releases the full savedAmount back
+// to the wallet inside this same transaction via the shared release writer.
 
 const executeContribution = async ({ userId, goalId, cycleKey, plannedAmount }) => {
   try {
@@ -179,16 +182,19 @@ const executeContribution = async ({ userId, goalId, cycleKey, plannedAmount }) 
 
       const newSaved = round2(Number(goal.savedAmount) + amount);
       const completes = newSaved >= Number(goal.targetAmount);
-      const goalUpdate = {
-        $inc: { savedAmount: amount },
-        $set: { "automation.lastProcessedCycle": cycleKey },
-      };
-      if (completes) {
-        goalUpdate.$set.status = "completed";
-        goalUpdate.$set.completedAt = new Date();
-        goalUpdate.$set["automation.enabled"] = false;
-      }
-      await Goal.updateOne({ _id: goalId, status: "active" }, goalUpdate, { session });
+      // Conditional write: a concurrent release/delete would otherwise leave
+      // a debited wallet with no matching goal credit. Zero matches means the
+      // goal changed under us — skip without moving anything.
+      const gRes = await Goal.updateOne(
+        { _id: goalId, status: "active" },
+        {
+          $inc: { savedAmount: amount },
+          $set: { "automation.lastProcessedCycle": cycleKey },
+        },
+        { session }
+      );
+      if (gRes.modifiedCount !== 1)
+        return { status: "skipped", reason: "goal_changed" };
 
       await GoalTransfer.create(
         [
@@ -219,6 +225,33 @@ const executeContribution = async ({ userId, goalId, cycleKey, plannedAmount }) 
         { session }
       );
 
+      // Fully funded before the target date: release immediately in this same
+      // transaction (never "complete first, release later"). The persisted
+      // final state is `released` with completedAt + releasedAt recorded.
+      let released = false;
+      let releasedAmount = 0;
+      if (completes) {
+        const rel = await writeGoalReleaseInSession(session, {
+          userId,
+          goalId,
+          title: goal.title,
+          releaseAmount: newSaved,
+          cycleKey: releaseCycleKeyFor(new Date()),
+          releaseMessage: `${taka(newSaved)} from your ${goal.title} goal has been returned to your wallet because you reached the target early.`,
+          completedAt: new Date(),
+        });
+        // Unreachable in practice (a lost claim means a concurrent release
+        // committed first, which also aborts this transaction on commit via
+        // write-conflict + retry). Abort rather than commit a half-state.
+        if (!rel.claimed) {
+          const err = new Error("This goal was just released by another process. No money was moved.");
+          err.statusCode = 400;
+          throw err;
+        }
+        released = true;
+        releasedAmount = rel.releasedAmount;
+      }
+
       return {
         status: "contributed",
         goalId: String(goalId),
@@ -226,6 +259,8 @@ const executeContribution = async ({ userId, goalId, cycleKey, plannedAmount }) 
         amount,
         cycleKey,
         completed: completes,
+        released,
+        releasedAmount,
       };
     });
   } catch (err) {
@@ -239,9 +274,17 @@ const executeContribution = async ({ userId, goalId, cycleKey, plannedAmount }) 
 // both the GoalTransfer ledger row (type manual_contribution) and the Savings
 // expense Transaction in the SAME session: any failed write aborts all of
 // them, so Wallet/Goal/ledger/Transaction can never disagree.
+// The requested amount is capped at the remaining target (an overshoot only
+// takes what is still needed), so the goal lands exactly on targetAmount.
+// When that final contribution fully funds the goal, the SAME transaction
+// immediately releases the full savedAmount back to the wallet via the shared
+// release writer (status `released`, one goal_release ledger row, one Savings
+// income Transaction, one deduplicated alert) — never "complete first,
+// release later". A fully funded goal releases immediately, even before
+// targetDate, exactly once and atomically.
 // Duplicate-safe: callers send a client-generated idempotencyKey; a retry
 // with the same key returns the already-created transfer without moving
-// money again (pre-check inside the transaction + unique sparse index race
+// money again (pre-check inside the transaction + unique partial index race
 // guard + post-race re-fetch).
 const codedError = (message, statusCode) => {
   const err = new Error(message);
@@ -287,42 +330,51 @@ export const executeManualContribution = async ({ userId, goalId, amount, idempo
       if (goal.status !== "active")
         throw codedError("Savings can only be added to an active goal.", 400);
 
+      // Cap at the remaining target instead of rejecting: a contribution that
+      // would overshoot only takes what is still needed, so the goal lands
+      // exactly on targetAmount and the release below returns exactly that.
       const remaining = round2(Number(goal.targetAmount) - Number(goal.savedAmount));
-      if (value > remaining)
-        throw codedError(
-          `Amount exceeds the remaining target. Only ${remaining} still needed.`,
-          400
-        );
+      if (!(remaining > 0))
+        throw codedError("This goal is already fully funded. No more savings are needed.", 400);
+      const amount = round2(Math.min(value, remaining));
+      if (!(amount > 0))
+        throw codedError("This goal is already fully funded. No more savings are needed.", 400);
 
       const wallet = await Wallet.findOne({ user: userId }).session(session);
       if (!wallet) throw codedError("Wallet not found.", 404);
-      if (Number(wallet.balance) < value)
+      if (Number(wallet.balance) < amount)
         throw codedError("Insufficient wallet balance for this transfer.", 400);
 
       const before = round2(Number(wallet.balance));
       const wRes = await Wallet.updateOne(
-        { _id: wallet._id, balance: { $gte: value } },
-        { $inc: { balance: -value } },
+        { _id: wallet._id, balance: { $gte: amount } },
+        { $inc: { balance: -amount } },
         { session }
       );
       if (wRes.modifiedCount !== 1)
         throw codedError("Insufficient wallet balance for this transfer.", 400);
-      const after = round2(before - value);
+      const after = round2(before - amount);
 
-      const newSaved = round2(Number(goal.savedAmount) + value);
+      const newSaved = round2(Number(goal.savedAmount) + amount);
       const completes = newSaved >= Number(goal.targetAmount);
-      const goalUpdate = { $inc: { savedAmount: value }, $set: {} };
-      if (completes) {
-        goalUpdate.$set.status = "completed";
-        goalUpdate.$set.completedAt = new Date();
-        goalUpdate.$set["automation.enabled"] = false;
-      }
-      await Goal.updateOne({ _id: goalId, status: "active" }, goalUpdate, { session });
+      // Conditional write: a concurrent release/delete would otherwise leave
+      // a debited wallet with no matching goal credit. Zero matches means the
+      // goal changed under us — abort with no money moved.
+      const gRes = await Goal.updateOne(
+        { _id: goalId, status: "active" },
+        { $inc: { savedAmount: amount } },
+        { session }
+      );
+      if (gRes.modifiedCount !== 1)
+        throw codedError(
+          "This goal changed while processing (it may have been completed, released, or deleted). Please refresh and try again.",
+          400
+        );
 
       // Unique per transfer attempt so the (user, goal, type, cycleKey)
       // index never collides across separate manual transfers. Retried
       // requests reuse the idempotencyKey, and dedup happens through the
-      // pre-checks plus the unique sparse index on (user, idempotencyKey).
+      // pre-checks plus the unique partial index on (user, idempotencyKey).
       const cycleKey = `manual:${String(new mongoose.Types.ObjectId())}`;
 
       const [transfer] = await GoalTransfer.create(
@@ -331,7 +383,7 @@ export const executeManualContribution = async ({ userId, goalId, amount, idempo
             user: userId,
             goal: goalId,
             type: "manual_contribution",
-            amount: value,
+            amount,
             cycleKey,
             walletBalanceBefore: before,
             walletBalanceAfter: after,
@@ -347,7 +399,7 @@ export const executeManualContribution = async ({ userId, goalId, amount, idempo
             user: userId,
             type: "expense",
             category: "Savings",
-            amount: value,
+            amount,
             date: new Date(),
             description: `Manual savings transfer to goal: ${goal.title}`,
           },
@@ -355,8 +407,44 @@ export const executeManualContribution = async ({ userId, goalId, amount, idempo
         { session }
       );
 
+      // Fully funded before the target date: release immediately in this same
+      // transaction (never "complete first, release later"). The persisted
+      // final state is `released` with completedAt + releasedAt recorded, and
+      // automation disabled — exactly one goal_release row, one Savings
+      // income transaction, one deduplicated alert.
+      let released = false;
+      let releasedAmount = 0;
+      let walletBalanceAfter = after;
+      if (completes) {
+        const rel = await writeGoalReleaseInSession(session, {
+          userId,
+          goalId,
+          title: goal.title,
+          releaseAmount: newSaved,
+          cycleKey: releaseCycleKeyFor(new Date()),
+          releaseMessage: `${taka(newSaved)} from your ${goal.title} goal has been returned to your wallet because you reached the target early.`,
+          completedAt: new Date(),
+        });
+        // Unreachable in practice (a lost claim means a concurrent release
+        // committed first, which also aborts this transaction on commit via
+        // write-conflict + retry). Abort rather than commit a half-state.
+        if (!rel.claimed)
+          throw codedError("This goal was just released by another process. No money was moved.", 400);
+        released = true;
+        releasedAmount = rel.releasedAmount;
+        walletBalanceAfter = rel.moved ? rel.walletBalanceAfter : after;
+      }
+
       const updatedGoal = await Goal.findOne({ _id: goalId }).session(session).lean();
-      return { status: "contributed", transfer: transfer.toObject(), goal: updatedGoal, completed: completes };
+      return {
+        status: "contributed",
+        transfer: transfer.toObject(),
+        goal: updatedGoal,
+        completed: completes,
+        released,
+        releasedAmount,
+        walletBalanceAfter,
+      };
     });
   } catch (err) {
     // Lost the index race with a concurrent retry: return the winner's row.
@@ -367,11 +455,140 @@ export const executeManualContribution = async ({ userId, goalId, amount, idempo
         return { status: "duplicate", transfer: prior, goal };
       }
     }
+    // Lost a same-day release race with the target-date path (this
+    // transaction aborted, so it moved nothing): the winner's single release
+    // row is the truth — report duplicate, never refund again.
+    if (isDuplicateKey(err)) {
+      const released = await GoalTransfer.findOne({
+        user: userId,
+        goal: goalId,
+        type: "goal_release",
+      }).lean();
+      if (released) {
+        const goal = await Goal.findOne({ _id: goalId, user: userId }).lean();
+        return { status: "duplicate", reason: "already_released", transfer: released, goal };
+      }
+    }
     throw err;
   }
 };
 
+// --- centralized release writer (runs inside the caller's transaction) --------
+// Single code path for returning a goal's saved funds to the wallet, shared
+// by target-date release and early-completion release so the two can never
+// refund the same goal twice.
+//
+// The caller MUST check (inside the same session, before calling) that the
+// goal row is owned by userId, is not cancelled, and has no prior
+// goal_release ledger row. This helper then:
+//   1. claims the release with a conditional status update
+//      ({ status: { $ne: "released" } }) — concurrent releasers serialize:
+//      exactly one claim wins; losers see modifiedCount 0 and must NOT move
+//      money (their transaction aborts/retries and takes the duplicate path);
+//   2. credits the wallet — skipped when releaseAmount is 0, so a
+//      zero-balance goal flips status without any fake money movement and
+//      without ledger/transaction rows;
+//   3. writes exactly one immutable goal_release ledger row (the unique index
+//      on (user, goal, type, cycleKey) is the hard backstop) + one matching
+//      Savings income Transaction + one deduplicated alert.
+// completedAt is set only when provided (early completion records it);
+// target-date release preserves the existing value without inventing one.
+const writeGoalReleaseInSession = async (
+  session,
+  { userId, goalId, title, releaseAmount, cycleKey, releaseMessage, completedAt = null }
+) => {
+  const amount = round2(Number(releaseAmount) || 0);
+  const now = new Date();
+
+  const claimSet = {
+    status: "released",
+    releasedAt: now,
+    releasedAmount: amount,
+    "automation.enabled": false,
+  };
+  if (completedAt) claimSet.completedAt = completedAt;
+
+  const claim = await Goal.updateOne(
+    { _id: goalId, status: { $ne: "released" } },
+    { $set: claimSet },
+    { session }
+  );
+  if (claim.modifiedCount !== 1) return { claimed: false };
+
+  if (!(amount > 0)) {
+    // Zero-balance goal: status flip only. No wallet write, no ledger row,
+    // no transaction, no alert — never a fake money movement.
+    return { claimed: true, moved: false, releasedAmount: 0 };
+  }
+
+  const wallet = await Wallet.findOne({ user: userId }).session(session);
+  if (!wallet) throw codedError("Wallet not found.", 404);
+  const before = round2(Number(wallet.balance));
+  await Wallet.updateOne({ _id: wallet._id }, { $inc: { balance: amount } }, { session });
+  const after = round2(before + amount);
+
+  const [transfer] = await GoalTransfer.create(
+    [
+      {
+        user: userId,
+        goal: goalId,
+        type: "goal_release",
+        amount,
+        cycleKey,
+        walletBalanceBefore: before,
+        walletBalanceAfter: after,
+      },
+    ],
+    { session }
+  );
+
+  await Transaction.create(
+    [
+      {
+        user: userId,
+        type: "income",
+        category: "Savings",
+        amount,
+        date: now,
+        description: `Goal funds released to wallet: ${title}`,
+      },
+    ],
+    { session }
+  );
+
+  // Deduplicated in-app notification (upsert, never twice).
+  const alertKey = `goal_release:${String(goalId)}`;
+  await Alert.updateOne(
+    { user: userId, sourceKey: alertKey },
+    {
+      $setOnInsert: {
+        user: userId,
+        type: "savings_goal",
+        severity: "medium",
+        title: "Goal funds added to wallet",
+        message: releaseMessage,
+        actionLink: "/goals",
+        relatedGoal: goalId,
+        sourceKey: alertKey,
+        dedupeKey: alertKey,
+      },
+    },
+    { upsert: true, session }
+  );
+
+  return {
+    claimed: true,
+    moved: true,
+    releasedAmount: amount,
+    walletBalanceAfter: after,
+    transfer: transfer.toObject(),
+  };
+};
+
 // --- single release (one MongoDB transaction) --------------------------------
+// Target-date release. Now writes through writeGoalReleaseInSession — the same
+// writer the early-completion path uses — so both paths share the claim
+// guard, the one-release-ever ledger check, and the alert dedupe key.
 
 const executeRelease = async ({ userId, goalId, now = new Date() }) => {
   try {
@@ -398,19 +615,18 @@ const executeRelease = async ({ userId, goalId, now = new Date() }) => {
       const amount = round2(Number(goal.savedAmount) || 0);
       const cycleKey = releaseCycleKeyFor(now);
 
-      if (amount <= 0) {
-        await Goal.updateOne(
-          { _id: goalId },
-          {
-            $set: {
-              status: "released",
-              releasedAt: new Date(),
-              releasedAmount: 0,
-              "automation.enabled": false,
-            },
-          },
-          { session }
-        );
+      if (!(amount > 0)) {
+        // Zero-balance due goal: status flip only, never a money movement.
+        const out = await writeGoalReleaseInSession(session, {
+          userId,
+          goalId,
+          title: goal.title,
+          releaseAmount: 0,
+          cycleKey,
+          releaseMessage: "",
+          completedAt: goal.completedAt || null,
+        });
+        if (!out.claimed) return { status: "duplicate", reason: "already_released" };
         return { status: "released", goalId: String(goalId), title: goal.title, amount: 0, cycleKey };
       }
 
@@ -423,12 +639,15 @@ const executeRelease = async ({ userId, goalId, now = new Date() }) => {
         .session(session)
         .lean();
       if (dup) {
+        // A release already returned this money: flip a stale status to match
+        // the winning ledger row, move nothing.
         await Goal.updateOne(
-          { _id: goalId },
+          { _id: goalId, status: { $ne: "released" } },
           {
             $set: {
               status: "released",
-              releasedAt: goal.releasedAt || new Date(),
+              releasedAt: dup.createdAt || new Date(),
+              releasedAmount: round2(Number(dup.amount) || 0),
               "automation.enabled": false,
             },
           },
@@ -446,80 +665,30 @@ const executeRelease = async ({ userId, goalId, now = new Date() }) => {
         .lean();
       if (anyRelease) {
         await Goal.updateOne(
-          { _id: goalId },
-          { $set: { status: "released", "automation.enabled": false } },
+          { _id: goalId, status: { $ne: "released" } },
+          {
+            $set: {
+              status: "released",
+              releasedAt: anyRelease.createdAt || new Date(),
+              releasedAmount: round2(Number(anyRelease.amount) || 0),
+              "automation.enabled": false,
+            },
+          },
           { session }
         );
         return { status: "duplicate", reason: "already_released" };
       }
 
-      const wallet = await Wallet.findOne({ user: userId }).session(session);
-      if (!wallet) return { status: "skipped", reason: "wallet_not_found" };
-      const before = round2(Number(wallet.balance));
-      await Wallet.updateOne({ _id: wallet._id }, { $inc: { balance: amount } }, { session });
-      const after = round2(before + amount);
-
-      await Goal.updateOne(
-        { _id: goalId },
-        {
-          $set: {
-            status: "released",
-            releasedAt: new Date(),
-            releasedAmount: amount,
-            "automation.enabled": false,
-          },
-        },
-        { session }
-      );
-
-      await GoalTransfer.create(
-        [
-          {
-            user: userId,
-            goal: goalId,
-            type: "goal_release",
-            amount,
-            cycleKey,
-            walletBalanceBefore: before,
-            walletBalanceAfter: after,
-          },
-        ],
-        { session }
-      );
-
-      await Transaction.create(
-        [
-          {
-            user: userId,
-            type: "income",
-            category: "Savings",
-            amount,
-            date: new Date(),
-            description: `Goal funds released to wallet: ${goal.title}`,
-          },
-        ],
-        { session }
-      );
-
-      // Deduplicated in-app notification (upsert, never twice).
-      const alertKey = `goal_release:${String(goalId)}`;
-      await Alert.updateOne(
-        { user: userId, sourceKey: alertKey },
-        {
-          $setOnInsert: {
-            user: userId,
-            type: "savings_goal",
-            severity: "medium",
-            title: "Goal funds added to wallet",
-            message: `${taka(amount)} from your ${goal.title} goal has been added to your wallet because the target date has arrived.`,
-            actionLink: "/goals",
-            relatedGoal: goalId,
-            sourceKey: alertKey,
-            dedupeKey: alertKey,
-          },
-        },
-        { upsert: true, session }
-      );
+      const out = await writeGoalReleaseInSession(session, {
+        userId,
+        goalId,
+        title: goal.title,
+        releaseAmount: amount,
+        cycleKey,
+        releaseMessage: `${taka(amount)} from your ${goal.title} goal has been added to your wallet because the target date has arrived.`,
+        completedAt: goal.completedAt || null,
+      });
+      if (!out.claimed) return { status: "duplicate", reason: "already_released" };
 
       return { status: "released", goalId: String(goalId), title: goal.title, amount, cycleKey };
     });
@@ -825,7 +994,9 @@ export const processAutoContributionsForUser = async (
     }
 
     const outcome = await executeContribution({ userId, goalId: g._id, cycleKey, plannedAmount: planned });
-    if (outcome.status === "contributed") available = round2(available - outcome.amount);
+    // An early release returns the full saved amount to the wallet, so the
+    // planning budget gains it back exactly as the wallet did.
+    if (outcome.status === "contributed") available = round2(available - outcome.amount + (Number(outcome.releasedAmount) || 0));
     results.push({ ...outcome, cycleKey, plannedAmount: planned });
   }
 
@@ -913,7 +1084,7 @@ export const runWeeklyCycleForAllUsers = async (cycleKey, now = new Date()) => {
         const contribution = round2(Math.min(planned, remaining));
         if (contribution > available) { summary.skipped += 1; continue; }
         const outcome = await executeContribution({ userId: uid, goalId: g._id, cycleKey, plannedAmount: planned });
-        if (outcome.status === "contributed") { summary.contributed += 1; available = round2(available - outcome.amount); }
+        if (outcome.status === "contributed") { summary.contributed += 1; available = round2(available - outcome.amount + (Number(outcome.releasedAmount) || 0)); }
         else if (outcome.status === "duplicate") summary.duplicates += 1;
         else summary.skipped += 1;
       }
@@ -956,7 +1127,7 @@ export const runMonthlyCycleForAllUsers = async (cycleKey) => {
         const contribution = round2(Math.min(planned, remaining));
         if (contribution > available) { summary.skipped += 1; continue; }
         const outcome = await executeContribution({ userId: uid, goalId: g._id, cycleKey, plannedAmount: planned });
-        if (outcome.status === "contributed") { summary.contributed += 1; available = round2(available - outcome.amount); }
+        if (outcome.status === "contributed") { summary.contributed += 1; available = round2(available - outcome.amount + (Number(outcome.releasedAmount) || 0)); }
         else if (outcome.status === "duplicate") summary.duplicates += 1;
         else summary.skipped += 1;
       }

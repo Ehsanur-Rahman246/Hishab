@@ -241,6 +241,18 @@ export const addedReply = (title, amount, language = "auto") => {
   return `${amt} added to your “${title}” goal from your wallet. Wallet deducted by ${amt}.`;
 };
 
+// Reply when the confirmed contribution fully funded the goal: the same
+// atomic transaction already returned the full saved amount to the wallet
+// (early-completion release), so the reply states both facts.
+export const addedEarlyReleaseReply = (title, amount, releasedAmount, language = "auto") => {
+  const rel = (Number(releasedAmount) || 0).toLocaleString("en-BD");
+  const base = addedReply(title, amount, language);
+  if (language === "bn" || language === "auto") {
+    return `${base} লক্ষ্য পূর্ণ হয়েছে। Goal completed early — BDT ${rel} has been returned to your wallet.`;
+  }
+  return `${base} Goal completed early — BDT ${rel} has been returned to your wallet.`;
+};
+
 export const addMoneyConditionFailedReply = (threshold, balance, language = "auto") => {
   const t = fmtBDT(threshold);
   const b = fmtBDT(balance);

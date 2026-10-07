@@ -61,7 +61,15 @@ Per cycle, per user:
    Lower-priority goals are still attempted after a skip.
 6. Never negative wallet (guarded `$gte` check inside the transaction),
    never beyond `targetAmount`, zero amounts never move.
-7. Reaching the target marks the goal `completed` and disables automation.
+7. A contribution that fully funds the goal releases the full savedAmount
+   back to the wallet **inside the same transaction** (early completion,
+   even before `targetDate`): persisted state `released` with `completedAt`
+   + `releasedAt` + `releasedAmount`, automation disabled, exactly one
+   `goal_release` ledger row, one `Savings` income Transaction, one
+   deduplicated alert. A fully funded goal releases its saved amount
+   immediately to the wallet, even before target date, exactly once and
+   atomically. Lifecycle: `active → completed → released` (`completed` is
+   transient; `released` is final once money has returned).
 
 ## Duplicate prevention (three layers)
 
@@ -74,8 +82,13 @@ Per cycle, per user:
 3. In-transaction re-checks (goal status, existing ledger row) inside the
    same MongoDB session, plus an in-process cron overlap guard.
 
-Releases are once-ever per goal: a same-day duplicate key plus an
-any-existing-release check plus the `released` status transition.
+Releases are once-ever per goal: a conditional `released`-status claim, a
+same-day duplicate key, an any-existing-release check, and the `released`
+status transition. Target-date release and early-completion release share one
+release writer (`writeGoalReleaseInSession`), one `goal_release` ledger
+namespace, and one alert dedupe key, so the two paths can never refund the
+same goal twice — concurrent final contributions, scheduler runs, Run now,
+and release-vs-delete races all collapse to a single refund.
 
 ## API
 
@@ -102,10 +115,13 @@ automation; paused/cancelled/completed/released receive nothing.
 Manual transfers: `POST /api/goals/:id/add-savings` takes
 `{ amount, idempotencyKey? }` and moves Wallet → Goal inside one MongoDB
 transaction (Wallet deduct + Goal credit + `manual_contribution` ledger row
-+ Savings expense Transaction). Resending the same `idempotencyKey` returns
-`{ success: true, duplicate: true, transfer }` without moving money again
-(unique sparse index on `user + idempotencyKey`). Reaching the target marks
-the goal `completed` and disables automation.
++ Savings expense Transaction). Amounts above the remaining target are
+capped (only what is still needed is taken). Resending the same
+`idempotencyKey` returns `{ success: true, duplicate: true, transfer }`
+without moving money again (unique partial index on `user + idempotencyKey`
+for string keys; keyless ledger rows never collide). A contribution that
+fully funds the goal releases it in the same transaction and the response
+carries `{ completed: true, released: true, releasedAmount, walletBalance }`.
 
 ## Local testing (PowerShell)
 
@@ -141,8 +157,10 @@ Scenarios to verify: one weekly goal; A(10%,p1)+B(10%,p2)+C(25%,p3) on
 ৳10,000 → A funded ৳1,000, B funded ৳1,000, C funded ৳2,500; duplicate Run
 now → `duplicate`, one ledger row per goal/cycle; past-due goal →
 `released`, wallet credited once, `savings_goal` alert linking `/goals`;
-paused goal skipped; contribution capped at `targetAmount`; manual add ৳500
-on ৳9,000 wallet → ৳8,500 with `manual_contribution` ledger row; Zakat
+ paused goal skipped; contribution capped at `targetAmount`; manual add ৳500
+on ৳9,000 wallet → ৳8,500 with `manual_contribution` ledger row; final
+contribution completing a goal → `released` in the same transaction with the
+full saved amount back in the wallet (“Goal completed early”); Zakat
 pension appears in the breakdown but never persists (page refresh clears it).
 
 ## Deployment warnings
@@ -160,6 +178,13 @@ pension appears in the breakdown but never persists (page refresh clears it).
 - Disable safely: set `GOAL_AUTOMATION_DISABLED=1` in `backend/.env`
   (jobs log a message and register nothing), or per-goal
   `PATCH /:id/automation { "enabled": false }` / `{ "paused": true }`.
+- **Index migration (one-time):** the `GoalTransfer` idempotency index
+  changed from `sparse` to a partial filter on string keys (a compound
+  sparse index still indexed every row because `user` is always present, so
+  any two keyless rows for one user collided). Mongoose will not replace the
+  old index automatically on existing databases — drop
+  `user_1_idempotencyKey_1` once so it is recreated with the new definition.
+  Fresh databases (and all tests) build the correct index directly.
 
 ## Honest limitations
 
